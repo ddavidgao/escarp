@@ -10,10 +10,15 @@
 
 Escarp is a Python package that routes AI agents to the right mode of web access
 for each task — autonomous, delegated, or supervised — automatically, with
-identity isolation, session isolation, and observation efficiency built in.
+identity isolation and session isolation built in.
 
 The one-line pitch: **"an identity-aware runtime that picks the right mode of
 web access per task, so agents never contaminate the user's personal browser."**
+
+Escarp is about *where and how* the agent touches the web. Observation —
+how the agent processes what it sees — is the user's concern. Escarp integrates
+cleanly with any observation layer (DeltaVision, raw screenshots, DOM snapshots,
+vision models) but depends on none of them.
 
 ## 2. Who this is for
 
@@ -61,6 +66,7 @@ mode, with correct isolation between them.
 
 - Not a browser. It uses existing browsers (Lightpanda, Chromium) as backends.
 - Not a scraping framework. It composes with existing ones.
+- Not an observation layer. Users bring their own (DeltaVision, screenshots, etc.).
 - Not a SaaS. No hosted component planned.
 - Not a SOC2-compliant production enterprise product. It's personal infra.
 - Not a replacement for Browser Use, Stagehand, Skyvern, etc. It sits below them.
@@ -72,11 +78,6 @@ mode, with correct isolation between them.
 headless browser. Written in Zig, 11× faster and 9× lighter than Chrome,
 speaks CDP. Driven via Python through `chrome-devtools-protocol` bindings.
 Falls back to Playwright+Chromium when Lightpanda coverage is insufficient.
-
-**DeltaVision** (PyPI, author's existing package) is the observation layer.
-Already ships with a 4-layer classifier and 224 tests. Escarp wraps it so
-agents get observation-efficiency automatically. Where the browser can emit
-DOM mutation events directly, Escarp prefers those and skips the CV pipeline.
 
 **Web Bot Auth** (`draft-meunier-web-bot-auth-architecture-05`, Cloudflare
 reference impl at github.com/cloudflare/web-bot-auth) is how Mode A agents
@@ -108,31 +109,39 @@ v0 ships only Mode A, because it's the easiest and most self-contained. Modes
 B and C come in v0.1 and v0.2. This is important — do not try to ship all
 three modes at once. v0 proves the architecture; later versions fill it in.
 
+**v0 success criterion:** an agent completes a predefined task that requires
+passing through Cloudflare bot verification, where an unauthenticated Playwright
+run against the same task fails or is blocked. Binary, reproducible, demonstrates
+the actual thesis. If you can't pass this, v0 isn't done; if you can, v0 ships.
+
 **v0 must include:**
 
 1. Package scaffolding: `pip install escarp`, clean public API, typed with
    pyright/mypy, tested with pytest.
 2. `AgentWorkspace` primitive (Mode A implementation): ephemeral profile dir,
-   generated Ed25519 keypair, Lightpanda-first with Playwright+Chromium
-   fallback.
+   generated Ed25519 keypair, Playwright+Chromium only (Lightpanda is v0.1).
 3. Web Bot Auth signing: RFC9421 HTTP message signatures on outbound requests.
    Signature-Agent / Signature-Input / Signature headers per the IETF draft.
+   Implemented directly with `cryptography` package — no dependency on
+   `http-message-signatures` lib (see Section 9).
 4. Key directory server: a small FastAPI app that serves JWKS at
-   `/.well-known/http-message-signatures-directory`. Intended to run on
-   davidgao.com (user hosts their own).
-5. Router stub: accepts a task, decides Mode A is the answer (hardcoded for
-   v0 since only Mode A exists), dispatches.
-6. DeltaVision integration: if the site permits DOM event streaming, emit
-   native deltas; otherwise fall back to DeltaVision's CV classifier.
-7. Benchmark harness that can produce a three-bar comparison: vanilla
-   Playwright, Playwright + DeltaVision, Escarp Mode A.
-8. A single end-to-end task that works start to finish as the demo example.
+   `/.well-known/http-message-signatures-directory`. Ships as
+   `escarp[directory]` optional extras install. Runs locally for dev,
+   deploys to davidgao.com for production.
+5. Router stub: accepts a task, returns `RouteDecision(mode=Mode.AUTONOMOUS,
+   reason="v0: router always selects Mode A")`. Signature matches the final
+   router's interface so v0.3's real router is a drop-in.
+6. End-to-end demo task: `llms.txt` discovery and fetch against a known-good
+   target that publishes one. Demonstrates signed Mode A identity, stable and
+   verifiable result.
 
 **v0 explicitly does NOT include:**
 
 - Mode B (OAuth). That's v0.1.
 - Mode C (supervised session inherit). That's v0.2.
 - The real router (Claude picking modes). v0 just hardcodes Mode A.
+- Lightpanda. v0 is Playwright+Chromium only; Lightpanda is v0.1.
+- Any observation layer. Users wire in DeltaVision or anything else themselves.
 - A TypeScript SDK. Python only.
 - A TUI / web UI for HITL prompts. CLI only.
 - Stealth / anti-detection features. Not in scope ever.
@@ -148,87 +157,93 @@ escarp/
 ├── PLAN.md                       # this document
 ├── src/
 │   └── escarp/
-│       ├── __init__.py           # public API: Agent, run, etc.
-│       ├── router.py             # task → mode classifier (stubbed in v0)
+│       ├── __init__.py           # public API: Agent, run, arun, etc.
+│       ├── router.py             # task → RouteDecision (stubbed in v0)
 │       ├── modes/
 │       │   ├── __init__.py
 │       │   ├── autonomous.py     # Mode A
-│       │   ├── delegated.py      # Mode B (stub in v0)
-│       │   └── supervised.py     # Mode C (stub in v0)
+│       │   ├── delegated.py      # Mode B (stub: raises NotImplementedError)
+│       │   └── supervised.py     # Mode C (stub: raises NotImplementedError)
 │       ├── workspace/
 │       │   ├── __init__.py
-│       │   ├── lightpanda.py     # Lightpanda driver
-│       │   ├── chromium.py       # Playwright+Chromium fallback
+│       │   ├── chromium.py       # Playwright+Chromium (v0)
+│       │   ├── lightpanda.py     # stub: raises NotImplementedError (v0.1)
 │       │   └── profile.py        # ephemeral profile mgmt
 │       ├── identity/
 │       │   ├── __init__.py
 │       │   ├── keypair.py        # Ed25519 gen + storage
-│       │   ├── signing.py        # RFC9421 message signatures
-│       │   └── directory.py      # JWKS key directory server
-│       ├── observation/
+│       │   └── signing.py        # RFC9421 message signatures (hand-rolled)
+│       ├── directory/            # optional extras: escarp[directory]
 │       │   ├── __init__.py
-│       │   ├── dom_deltas.py     # native DOM mutation stream
-│       │   └── deltavision.py    # DeltaVision integration (fallback)
-│       ├── credentials/
-│       │   ├── __init__.py
-│       │   └── keyring.py        # OS keyring wrapper
+│       │   ├── server.py         # FastAPI JWKS endpoint
+│       │   └── cli.py            # `escarp-directory` console script
 │       └── config.py
 ├── tests/
-│   ├── test_workspace.py
-│   ├── test_signing.py           # verify against crawltest.com
-│   ├── test_observation.py
+│   ├── test_workspace.py         # includes profile isolation tests
+│   ├── test_signing.py           # RFC9421 vectors + crawltest.com
 │   └── test_router.py
 ├── bench/
-│   ├── __init__.py
-│   ├── harness.py
 │   └── tasks/                    # reproducible benchmark tasks
 ├── examples/
-│   ├── apartment_search.py
+│   ├── llms_txt_fetch.py         # v0 demo task
 │   └── hello_escarp.py
 └── scripts/
     └── verify_web_bot_auth.py    # tests against crawltest.com
 ```
+
+Key differences from original proposal: `observation/` and `credentials/`
+modules removed (not v0 scope). `directory/` promoted to top-level module,
+not nested inside `identity/` (different deployment concern). `lightpanda.py`
+present as a stub, not absent.
 
 ## 8. Public API sketch (Claude Code: critique this too)
 
 ```python
 from escarp import Agent, run
 
-# High-level one-shot
-result = run(task="find 5 apartments in West Lafayette under $1500")
+# High-level one-shot — sync facade, internally uses asyncio.run()
+result = run(task="fetch llms.txt from anthropic.com")
+
+# Async variant for callers already in an async context
+result = await agent.arun(task="fetch llms.txt from anthropic.com")
 
 # Lower-level for control
 agent = Agent(
-    name="apartment-hunter",
+    name="researcher",
     # mode=... omitted = router decides; explicit override allowed
 )
-result = agent.run(task="find 5 apartments in West Lafayette under $1500")
+result = agent.run(task="fetch llms.txt from anthropic.com")
 
-# Even lower-level: direct workspace access for advanced users
+# Direct workspace access for advanced users
+# observe() is the user's responsibility — they wire in whatever they want
 with agent.workspace() as ws:
-    page = ws.goto("https://example.com")
-    page.click("button.search")
-    deltas = page.observe()  # yields DeltaVision-format observation events
+    ws.goto("https://example.com")
+    ws.click("button.search")
+    screenshot = ws.screenshot()  # PIL Image — user passes to DeltaVision etc.
+    page = ws.page                # underlying Playwright Page if user needs it
 ```
+
+`ws.goto()` returns None (navigation side-effect, not a new object).
+`ws.page` exposes the raw Playwright Page for users who want direct access
+or want to plug in an observation layer.
 
 ## 9. Stack
 
-- **Language:** Python 3.11+ (match DeltaVision's minimum)
-- **Package manager:** `uv` (modern, fast, matches DeltaVision's toolchain)
+- **Language:** Python 3.11+
+- **Package manager:** `uv`
 - **Build:** `hatchling` via pyproject.toml
-- **Browser:** Lightpanda (primary), Playwright+Chromium (fallback)
-- **HTTP signing:** `http-message-signatures` Python lib + manual implementation
-  for the pieces not covered
-- **Crypto:** `cryptography` package (Ed25519 via PyNaCl backend)
-- **CDP:** raw websockets via `websockets` package, or `chrome-devtools-protocol`
-  if it's maintained
-- **Credential storage:** `keyring` package
-- **Key directory server:** FastAPI + uvicorn, tiny standalone app
+- **Browser:** Playwright+Chromium (v0); Lightpanda stub present, activated in v0.1
+- **HTTP signing:** hand-rolled RFC9421 implementation (~80 lines) using
+  `cryptography` package directly. The `http-message-signatures` PyPI package
+  is unmaintained and doesn't handle `Signature-Agent` or derived components
+  correctly. Own the security-critical path.
+- **Crypto:** `cryptography` package (Ed25519)
+- **Key directory server:** FastAPI + uvicorn (optional extras: `escarp[directory]`)
 - **Testing:** pytest + pytest-asyncio
 - **Typing:** mypy strict mode
 - **Linting:** ruff
-- **LLM:** Anthropic API, `anthropic` SDK, Opus 4.7 as default model
-- **Observation:** depends on DeltaVision (`pip install deltavision`)
+- **LLM:** Anthropic API, `anthropic` SDK, claude-opus-4-7 as default model
+- **Observation:** none — user-supplied
 
 ## 10. Design principles (non-negotiable)
 
@@ -238,15 +253,16 @@ with agent.workspace() as ws:
 3. **Credentials never written to disk in plaintext.** OS keyring only.
 4. **Session isolation is load-bearing.** Mode A workspaces must not be able
    to read the user's real Chrome profile. Ever. Test this explicitly.
-5. **Fail loud, not silent.** If Lightpanda crashes, crash loudly and say so;
-   don't silently fall back and pretend everything's fine. Fallback is opt-in.
-6. **Benchmarks have artifacts.** Every benchmark run produces a JSON file
-   with token counts, timing, trace ID. Matches DeltaVision's existing pattern.
-7. **Tests cover security properties, not just happy paths.** The
+5. **Fail loud, not silent.** If a backend is unavailable, raise a clear
+   exception; don't silently fall back. Fallback is opt-in and explicit.
+6. **Tests cover security properties, not just happy paths.** The
    profile-isolation test is more important than the "it navigates to a URL"
    test.
-8. **No magic.** The router's decision is observable and explainable. If
+7. **No magic.** The router's decision is observable and explainable. If
    Escarp picks Mode A, it logs why. Users who want to override can.
+8. **Observation is the user's concern.** Escarp provides `ws.screenshot()`
+   and `ws.page` as escape hatches. It does not process, classify, or
+   interpret what the agent sees.
 
 ## 11. Day-by-day v0 build plan
 
@@ -254,36 +270,34 @@ Not a deadline, a sequencing. Claude Code may propose compression or
 reorganization.
 
 **Day 1:** Package scaffolding (uv init, pyproject, ruff, mypy, pytest).
-`AgentWorkspace` primitive with Playwright+Chromium path (Lightpanda second).
-Ephemeral profile directory with isolation test (workspace cannot read main
-profile cookies).
+`AgentWorkspace` primitive with Playwright+Chromium. Ephemeral profile
+directory with isolation tests: workspace cannot read real profile cookies,
+localStorage, extensions, or saved passwords.
 
-**Day 2:** Ed25519 keypair generation. RFC9421 HTTP message signing. Local
-signing proxy that intercepts outbound requests from the workspace and adds
-signatures.
+**Day 2:** Ed25519 keypair generation. Hand-rolled RFC9421 HTTP message
+signing. Unit tests with known test vectors.
 
-**Day 3:** Key directory FastAPI app. JWKS serving. Deploy script for
-davidgao.com. End-to-end test against crawltest.com/cdn-cgi/web-bot-auth —
-expect HTTP 200.
+**Day 3:** Key directory FastAPI app (`escarp[directory]`). JWKS serving.
+Deploy script for davidgao.com. End-to-end test against
+crawltest.com/cdn-cgi/web-bot-auth — expect HTTP 200.
 
-**Day 4:** DeltaVision integration. DOM mutation event streaming where
-Lightpanda supports it. Fallback to DeltaVision's CV classifier otherwise.
-Reuse DeltaVision's observation format so current users upgrade trivially.
+**Day 4:** Mode A end-to-end: agent launches workspace, signs outbound
+requests, completes a multi-step task against a Cloudflare-protected target.
+Integration test verifies: same task fails without signing, succeeds with it.
 
-**Day 5:** Router stub. Hardcoded Mode A for v0. Instrumented so when
-Modes B and C land later, the router's decision process is already in place.
+**Day 5:** Router stub. `RouteDecision` dataclass. Hardcoded Mode A for v0,
+structured so v0.3's real router is a drop-in.
 
-**Day 6:** Benchmark harness. Three-bar comparison task
-(vanilla Playwright vs Playwright+DeltaVision vs Escarp). JSON artifacts.
-At least one real end-to-end task that completes successfully.
+**Day 6:** `llms.txt` demo task end-to-end. `hello_escarp.py` example.
+Verify the v0 success criterion (signed agent passes, unsigned Playwright
+fails).
 
-**Day 7:** README, examples, ship to PyPI as v0.1.0 (not v0.0.1 — there is
-a real thing shipped here).
+**Day 7:** README, examples, ship to PyPI as `0.1.0`.
 
 ## 12. Longer-term sequence (post-v0)
 
-- **v0.1:** Mode B. OAuth flows, keyring integration, Gmail + Calendar as
-  first-class supported services.
+- **v0.1:** Lightpanda substrate. Mode B (OAuth flows, keyring integration,
+  Gmail + Calendar as first-class supported services).
 - **v0.2:** Mode C. Chrome profile copy-on-write, HITL prompt system (CLI
   first, maybe a menubar app later), Brightspace as reference implementation.
 - **v0.3:** Real router. Claude Opus 4.7 reasoning about mode selection with
@@ -300,37 +314,51 @@ a real thing shipped here).
 - Competing with Strata Identity, Auth0, Okta. Escarp is not an enterprise
   IAM product.
 - Being a browser. Lightpanda and Chromium are browsers; Escarp uses them.
+- Being an observation layer. DeltaVision is an observation layer. They're
+  orthogonal; Escarp integrates with observation layers, it is not one.
 - Stealth / anti-bot evasion. Polite identified access is the whole point.
 - Solving agent alignment / safety at the model level. Escarp handles the
   security boundary at the *runtime* level only.
 
-## 14. Open questions for Claude Code to raise
+## 14. Open questions (answered — preserved for record)
 
-Do not assume answers to these. Raise them in your first response.
+These were raised and answered during the planning review. Preserved here
+so the reasoning is auditable.
 
-1. Is the Lightpanda Python CDP binding mature enough to rely on, or should
-   v0 ship Playwright+Chromium only and add Lightpanda as a follow-up?
-2. Is `http-message-signatures` Python library sufficient for our signing
-   needs, or do we need to implement RFC9421 ourselves?
-3. Should the key directory server be bundled with Escarp (run locally for
-   development) or strictly separate (user deploys it themselves)?
-4. What's the cleanest way to test profile isolation — are there attack
-   vectors beyond cookie reads that need to be covered?
-5. Does the DeltaVision observation format assume Playwright-shaped input,
-   or is it backend-agnostic? Does that change anything?
-6. What does a "router stub" look like in practice — a no-op that always
-   returns Mode A, or a real LLM call with Mode B/C paths shortcut to
-   "not yet implemented"?
+1. **Lightpanda maturity:** Not mature enough for v0. Python bindings are
+   effectively unmaintained. v0 ships Playwright+Chromium only; Lightpanda
+   stub exists but raises `NotImplementedError`. Activated in v0.1.
+
+2. **`http-message-signatures` library:** Insufficient. Doesn't handle
+   `Signature-Agent` or derived component normalization correctly.
+   Implement RFC9421 ourselves with `cryptography` package (~80 lines).
+
+3. **Key directory server bundling:** Ships as `escarp[directory]` optional
+   extras. Runs locally for dev on `localhost:8000`; same code deploys to
+   davidgao.com. Not a hard dependency for Mode A users.
+
+4. **Profile isolation attack surface:** Cookies, localStorage, IndexedDB,
+   Chrome extensions, saved passwords, certificate store. All must be
+   isolated. Tests cover each vector. Attack: navigate to
+   `accounts.google.com`, read `document.cookie` — expect empty string.
+
+5. **DeltaVision coupling:** Removed from Escarp's dependencies entirely.
+   DeltaVision's DOM layer is Playwright-coupled; its CV pipeline is
+   backend-agnostic. Escarp exposes `ws.screenshot()` and `ws.page` so
+   users can wire in DeltaVision or any other observer themselves.
+   Escarp does not observe; it routes.
+
+6. **Router stub design:** `RouteDecision(mode=Mode.AUTONOMOUS, reason="v0:
+   router always selects Mode A")`. Stub signature matches final router
+   interface exactly. No LLM call in v0 — mode is hardcoded.
 
 ## 15. How to work with me on this
 
 - Write plans before you write code. Show me the plan, I push back, then
   you write.
-- When in doubt, match DeltaVision's existing patterns. Consistency across
-  the Delta* / Escarp codebase is worth more than local optimization.
 - Tests before features. Security-critical properties get tests first.
 - If you hit a decision I haven't anticipated, stop and ask. Don't pick for me.
 - If you find a better name for something in the codebase, propose it before
   committing. Names matter.
-- Respect the scope boundaries. v0 is Mode A. Don't write Mode B "while you're
-  in there." Scope creep is how this doesn't ship.
+- Respect the scope boundaries. v0 is Mode A only. Don't write Mode B or
+  Lightpanda support "while you're in there." Scope creep is how this doesn't ship.
