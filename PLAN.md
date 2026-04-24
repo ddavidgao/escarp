@@ -109,10 +109,22 @@ v0 ships only Mode A, because it's the easiest and most self-contained. Modes
 B and C come in v0.1 and v0.2. This is important — do not try to ship all
 three modes at once. v0 proves the architecture; later versions fill it in.
 
-**v0 success criterion:** an agent completes a predefined task that requires
-passing through Cloudflare bot verification, where an unauthenticated Playwright
-run against the same task fails or is blocked. Binary, reproducible, demonstrates
-the actual thesis. If you can't pass this, v0 isn't done; if you can, v0 ships.
+**v0 success criterion:** two independent tests, both must pass:
+
+1. **Signature correctness:** `scripts/verify_web_bot_auth.py` hits
+   `crawltest.com/cdn-cgi/web-bot-auth` and gets HTTP 200. Unsigned request
+   to the same endpoint gets HTTP 400. This verifies the RFC9421 signing
+   implementation is correct.
+
+2. **Enforcement demo:** a Cloudflare Worker deployed by us (not a production
+   third-party site) enforces the same policy: 400 unsigned, 200 signed. This
+   is the "blocked vs. allowed" demo. No public production site currently
+   enforces Web Bot Auth in blocking mode — the feature is opt-in and still
+   in adoption. We deploy our own enforcer.
+
+v0 optimizes for correctness over speed. Chromium is heavier than Lightpanda;
+that is acceptable for a correctness demo. Lightpanda integration in v0.1
+addresses performance.
 
 **v0 must include:**
 
@@ -127,7 +139,9 @@ the actual thesis. If you can't pass this, v0 isn't done; if you can, v0 ships.
 4. Key directory server: a small FastAPI app that serves JWKS at
    `/.well-known/http-message-signatures-directory`. Ships as
    `escarp[directory]` optional extras install. Runs locally for dev,
-   deploys to davidgao.com for production.
+   exposed via Cloudflare Tunnel (not ngrok — no account required) during
+   development. davidgao.com deployment happens at ship time, not during
+   the v0 build.
 5. Router stub: accepts a task, returns `RouteDecision(mode=Mode.AUTONOMOUS,
    reason="v0: router always selects Mode A")`. Signature matches the final
    router's interface so v0.3's real router is a drop-in.
@@ -140,7 +154,9 @@ the actual thesis. If you can't pass this, v0 isn't done; if you can, v0 ships.
 - Mode B (OAuth). That's v0.1.
 - Mode C (supervised session inherit). That's v0.2.
 - The real router (Claude picking modes). v0 just hardcodes Mode A.
-- Lightpanda. v0 is Playwright+Chromium only; Lightpanda is v0.1.
+- Lightpanda. v0 is Playwright+Chromium only; Lightpanda is v0.1. The demo
+  task is scoped so Chromium's weight doesn't matter (single-page fetch, not
+  a multi-step workflow). Speed is not a v0 acceptance criterion.
 - Any observation layer. Users wire in DeltaVision or anything else themselves.
 - A TypeScript SDK. Python only.
 - A TUI / web UI for HITL prompts. CLI only.
@@ -278,8 +294,10 @@ localStorage, extensions, or saved passwords.
 signing. Unit tests with known test vectors.
 
 **Day 3:** Key directory FastAPI app (`escarp[directory]`). JWKS serving.
-Deploy script for davidgao.com. End-to-end test against
-crawltest.com/cdn-cgi/web-bot-auth — expect HTTP 200.
+Expose via Cloudflare Tunnel for `.well-known` reachability during dev.
+End-to-end test against crawltest.com/cdn-cgi/web-bot-auth — expect HTTP 200.
+Deploy a Cloudflare Worker that enforces Web Bot Auth blocking (our own
+enforcer, since no public production site does this yet).
 
 **Day 4:** Mode A end-to-end: agent launches workspace, signs outbound
 requests, completes a multi-step task against a Cloudflare-protected target.
