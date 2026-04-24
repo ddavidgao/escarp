@@ -16,6 +16,7 @@ classifiers = [
 ]
 dependencies = [
     "cryptography>=42.0",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
