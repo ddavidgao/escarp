@@ -18,10 +18,6 @@ class BrowserPage(Protocol):
         """Return raw PNG bytes."""
         ...
 
-    async def evaluate(self, expression: str) -> object:
-        """Evaluate a JavaScript expression and return the result."""
-        ...
-
     async def content(self) -> str:
         """Return the page's full HTML content."""
         ...
