@@ -8,6 +8,7 @@ boundary using real Chromium launches, not mocks.
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,9 @@ async def test_workspace_cannot_read_cookies_from_separate_profile() -> None:
     cookie_name = "escarp_isolation_sentinel"
     cookie_value = "should_not_be_visible"
 
-    # Write a known cookie into a "real profile" dir via a separate Chromium context.
+    # Write a known persistent cookie into a "real profile" dir.
+    # Must use expires= — session cookies don't survive Chromium restarts,
+    # so without expires the setup silently fails and the test is a false negative.
     with tempfile.TemporaryDirectory(prefix="escarp-real-profile-") as real_dir:
         async with async_playwright() as pw:
             real_ctx = await pw.chromium.launch_persistent_context(
@@ -39,12 +42,20 @@ async def test_workspace_cannot_read_cookies_from_separate_profile() -> None:
                 "value": cookie_value,
                 "domain": "example.com",
                 "path": "/",
+                "expires": int(time.time()) + 86400,
             }])
+            # Verify setup: cookie is actually readable in the same profile.
+            setup_page = await real_ctx.new_page()
+            await setup_page.goto("https://example.com")
+            setup_cookies = await setup_page.evaluate("document.cookie")
+            assert cookie_name in str(setup_cookies), (
+                "Test setup failed: cookie was not written to the real profile. "
+                "This test cannot be trusted."
+            )
             await real_ctx.close()
 
         # Launch an Escarp workspace — different temp dir, knows nothing of real_dir.
         async with launch_chromium(headless=True) as ws:
-            # Confirm the workspace profile dir is not the real profile dir.
             assert ws.profile_dir != Path(real_dir)
 
             async with ws.new_page() as page:
