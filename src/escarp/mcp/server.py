@@ -112,7 +112,11 @@ async def escarp_status() -> dict[str, Any]:
                 "state": s["state"],
                 "holder": s.get("holder"),
                 "dev_port": s.get("dev_port"),
+                "last_heartbeat": s.get("last_heartbeat"),
                 "expires_at": s.get("expires_at"),
+                "suspected_stale": s.get("suspected_stale"),
+                "available_after_s": s.get("available_after_s"),
+                "retry_after_s": s.get("retry_after_s"),
                 "os_window_id": s.get("os_window_id"),
                 "owner_pid": s.get("owner_pid"),
                 "bounds": (
@@ -123,12 +127,16 @@ async def escarp_status() -> dict[str, Any]:
                 "cdp_port": s["cdp_port"],
                 "cdp_window_id": s.get("cdp_window_id"),
                 "cdp_ws_url": s["cdp_ws_url"],
+                "cua_app_bundle_id": s.get("cua_app_bundle_id"),
+                "cua_app_name": s.get("cua_app_name"),
+                "cua_app_path": s.get("cua_app_path"),
                 "calibration_note": s.get("calibration_note"),
             }
         )
     return {
         "pool_size": data["pool_size"],
         "lease_ttl_s": data["lease_ttl_s"],
+        "reaper_interval_s": data.get("reaper_interval_s"),
         "slots": slots_out,
         "currently_holding_slot": _LEASE.slot,
     }
@@ -205,6 +213,9 @@ async def escarp_acquire(
         "cdp_window_id": data.get("cdp_window_id"),
         "cdp_target_id": data.get("cdp_target_id"),
         "cdp_ws_url": data["cdp_ws_url"],
+        "cua_app_bundle_id": data.get("cua_app_bundle_id"),
+        "cua_app_name": data.get("cua_app_name"),
+        "cua_app_path": data.get("cua_app_path"),
         "dev_port": data.get("dev_port"),
         "expires_at": data["expires_at"],
         "auto_heartbeat_interval_s": ttl / HEARTBEAT_DIVISOR,

@@ -48,13 +48,48 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cua_prompt_for(slot: int) -> str:
+def _cua_prompt_for(record: dict) -> str:
+    slot = record["slot"]
+    bundle_id = record.get("cua_app_bundle_id")
+    app_name = record.get("cua_app_name")
+    app_path = record.get("cua_app_path")
+    if bundle_id:
+        return (
+            f'Use native Computer Use on the app with bundle identifier "{bundle_id}" '
+            f'({app_name or f"Escarp Chrome Slot {slot}"}). Do not switch apps or '
+            f"open a different browser. This app is the leased escarp slot {slot}. "
+            f"[YOUR TASK HERE]"
+        )
+    if app_path:
+        return (
+            f'Use native Computer Use on the app at "{app_path}". Do not switch apps '
+            f"or open a different browser. This app is the leased escarp slot {slot}. "
+            f"[YOUR TASK HERE]"
+        )
     title = slot_title(slot)
     return (
         f'Use the currently frontmost Chrome for Testing window (titled "{title}"). '
         f"Do not switch windows, switch apps, or open new browsers -- act only in this "
         f"specific window. [YOUR TASK HERE]"
     )
+
+
+def _slot_record(slot: int) -> dict | None:
+    resp = httpx.get(f"{BROKER_URL_DEFAULT}/status", timeout=3.0)
+    resp.raise_for_status()
+    data = resp.json()
+    return next((s for s in data["slots"] if s["slot"] == slot), None)
+
+
+def _release_acquired(record: dict) -> None:
+    try:
+        httpx.post(
+            f"{BROKER_URL_DEFAULT}/release",
+            json={"lease_token": record["lease_token"]},
+            timeout=10.0,
+        )
+    finally:
+        lease_state.remove_by_slot(record["slot"])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,11 +131,31 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  expires_at: {record['expires_at']:.0f}")
 
     if args.focus:
+        try:
+            target = _slot_record(record["slot"])
+        except Exception as exc:
+            print(
+                f"could not verify slot {record['slot']} OS-window identity after acquire: {exc}",
+                file=sys.stderr,
+            )
+            _release_acquired(record)
+            return 4
+
+        if target is None:
+            print(f"slot {record['slot']} disappeared from broker status", file=sys.stderr)
+            _release_acquired(record)
+            return 4
+
+        bounds = target.get("bounds")
+        bounds_tuple = tuple(bounds) if bounds is not None else None
         focus_result = asyncio.run(
             focus_slot(
                 slot=record["slot"],
-                cdp_port=record["cdp_port"],
-                cdp_ws_url=record["cdp_ws_url"],
+                cdp_port=target["cdp_port"],
+                cdp_ws_url=target["cdp_ws_url"],
+                cg_window_number=target.get("os_window_id"),
+                cg_window_owner_pid=target.get("owner_pid"),
+                cg_window_bounds=bounds_tuple,  # type: ignore[arg-type]
             )
         )
         print()
@@ -109,12 +164,21 @@ def main(argv: list[str] | None = None) -> int:
         if focus_result.notes:
             for note in focus_result.notes:
                 print(f"  note: {note}")
+        if not focus_result.succeeded():
+            print()
+            print(
+                "focus verification failed; not emitting a Codex CUA prompt and "
+                "releasing the lease to avoid a stale lock.",
+                file=sys.stderr,
+            )
+            _release_acquired(record)
+            return 4
 
     if args.prompt:
         print()
         print("Paste this into Codex CUA (then append your task in the bracketed spot):")
         print()
-        print(f'  "{_cua_prompt_for(record["slot"])}"')
+        print(f'  "{_cua_prompt_for(record)}"')
 
     print()
     print("When done:")

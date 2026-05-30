@@ -22,6 +22,7 @@ from escarp.broker.browser import (
     find_cft_binary,
     launch_cft,
 )
+from escarp.broker.cua_apps import CuaAppError, ensure_cua_slot_app
 from escarp.broker.discovery import probe
 from escarp.broker.slots import profile_dir_for_slot
 
@@ -35,6 +36,7 @@ async def launch_pool(
     cdp_base_port: int = DEFAULT_CDP_BASE,
     cft_binary: Path,
     tier: str = "autonomous",
+    cua_apps: bool = False,
 ) -> int:
     """Spawn `pool_size` detached CfTs at cdp_base_port, cdp_base_port+1, ...
 
@@ -42,6 +44,8 @@ async def launch_pool(
     `escarp launch-pool` twice doesn't double-launch.
     """
     print(f"using CfT binary: {cft_binary}")
+    if cua_apps:
+        print("native CUA mode: per-slot app bundles enabled")
     print(f"target: slots [0, {pool_size}) on cdp_ports {cdp_base_port}..{cdp_base_port + pool_size - 1}\n")
 
     launched = 0
@@ -56,10 +60,24 @@ async def launch_pool(
             continue
 
         profile = profile_dir_for_slot(slot, tier=tier)
+        binary = cft_binary
+        cua_detail = ""
+        if cua_apps:
+            try:
+                slot_app = ensure_cua_slot_app(slot=slot, cft_binary=cft_binary)
+            except CuaAppError as exc:
+                print(f"[slot {slot}] CUA app setup failed: {exc}", file=sys.stderr)
+                failed += 1
+                continue
+            binary = slot_app.binary_path
+            cua_detail = (
+                f"\n            cua_app={slot_app.app_path}"
+                f"\n            cua_bundle_id={slot_app.bundle_id}"
+            )
         try:
             browser = launch_cft(
                 slot=slot,
-                binary=cft_binary,
+                binary=binary,
                 profile_dir=profile,
                 cdp_port=port,
             )
@@ -72,6 +90,7 @@ async def launch_pool(
             f"[slot {slot}] launched  pid={browser.pid}  cdp_port={port}\n"
             f"            ws={browser.cdp_ws_url}\n"
             f"            profile={profile}"
+            f"{cua_detail}"
         )
         launched += 1
 
@@ -101,6 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         default=int(os.environ.get("ESCARP_CDP_BASE", DEFAULT_CDP_BASE)),
         help="cdp port for slot 0; slot N uses base+N",
     )
+    parser.add_argument(
+        "--cua-apps",
+        action="store_true",
+        help=(
+            "macOS: launch each slot from a unique app bundle identity so native "
+            "Codex CUA can target slots as separate apps"
+        ),
+    )
     args = parser.parse_args(argv)
 
     cft = find_cft_binary()
@@ -118,5 +145,6 @@ def main(argv: list[str] | None = None) -> int:
             pool_size=args.pool_size,
             cdp_base_port=args.cdp_base_port,
             cft_binary=cft,
+            cua_apps=args.cua_apps,
         )
     )

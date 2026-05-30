@@ -42,6 +42,7 @@ def build_app(broker: Broker) -> web.Application:
             {
                 "pool_size": broker.pool_size(),
                 "lease_ttl_s": broker.lease_ttl_s,
+                "reaper_interval_s": broker.reaper_interval_s,
                 "slots": broker.snapshot(),
             }
         )
@@ -99,7 +100,12 @@ def build_app(broker: Broker) -> web.Application:
             rec = await broker.release(lease_token=token)
         except UnknownLease as exc:
             return web.json_response({"error": "unknown_lease", "message": str(exc)}, status=404)
-        return web.json_response(rec.to_public())
+        return web.json_response(
+            rec.to_public(
+                lease_ttl_s=broker.lease_ttl_s,
+                reaper_interval_s=broker.reaper_interval_s,
+            )
+        )
 
     @routes.get("/reaped")
     async def reaped(_request: web.Request) -> web.Response:

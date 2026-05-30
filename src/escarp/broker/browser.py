@@ -31,6 +31,9 @@ _BASE_FLAGS: tuple[str, ...] = (
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
     "--disable-extensions",
+    # macOS: per-slot CUA app bundles have unique bundle IDs. Without this,
+    # Chromium asks for "Chromium Safe Storage" keychain access per slot.
+    "--use-mock-keychain",
 )
 
 

@@ -135,6 +135,26 @@ async def test_snapshot_does_not_leak_token() -> None:
     assert "lease_token" not in snapshot[0]
 
 
+async def test_snapshot_surfaces_bounded_wait_fields() -> None:
+    broker = Broker(lease_ttl_s=10.0, reaper_interval_s=2.0)
+    _seed(broker, 2)
+    rec = await broker.acquire(holder="A", slot=0)
+    assert rec.last_heartbeat is not None
+    rec.last_heartbeat -= 6.0
+    rec.expires_at = rec.last_heartbeat + broker.lease_ttl_s
+
+    snapshot = broker.snapshot()
+    leased = next(s for s in snapshot if s["slot"] == 0)
+    free = next(s for s in snapshot if s["slot"] == 1)
+
+    assert leased["suspected_stale"] is True
+    assert 5.0 < leased["available_after_s"] <= 6.0
+    assert leased["retry_after_s"] == leased["available_after_s"]
+    assert free["suspected_stale"] is False
+    assert free["available_after_s"] == 0.0
+    assert free["retry_after_s"] == 0.0
+
+
 async def test_concurrent_acquires_serialize() -> None:
     """Two concurrent acquires on the same single-slot pool: exactly one wins."""
     broker = Broker()

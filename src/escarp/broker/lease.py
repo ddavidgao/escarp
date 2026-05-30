@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 # long, long enough that a healthy agent's heartbeat cadence (~TTL/3) doesn't
 # spam the broker.
 DEFAULT_LEASE_TTL_S = 60.0
+DEFAULT_REAPER_INTERVAL_S = 2.0
 
 
 class BrokerError(Exception):
@@ -68,13 +69,40 @@ class LeaseRecord:
     cdp_window_id: int | None = None
     cdp_target_id: str | None = None
     calibration_note: str | None = None
+    cua_app_bundle_id: str | None = None
+    cua_app_path: str | None = None
+    cua_app_name: str | None = None
 
-    def to_public(self) -> dict[str, object]:
+    def to_public(
+        self,
+        *,
+        lease_ttl_s: float,
+        reaper_interval_s: float,
+        now: float | None = None,
+    ) -> dict[str, object]:
         d = asdict(self)
         # Don't leak the lease token in public snapshots (e.g. /status). The
         # token is returned only to the holder at acquire/heartbeat time.
         d.pop("lease_token", None)
+        now = now if now is not None else time.time()
+        d["suspected_stale"] = self._suspected_stale(lease_ttl_s=lease_ttl_s, now=now)
+        d["available_after_s"] = self._available_after_s(
+            reaper_interval_s=reaper_interval_s,
+            now=now,
+        )
+        # Alias for agents that want an HTTP-style backoff field name.
+        d["retry_after_s"] = d["available_after_s"]
         return d
+
+    def _suspected_stale(self, *, lease_ttl_s: float, now: float) -> bool:
+        if self.state != "leased" or self.last_heartbeat is None:
+            return False
+        return now - self.last_heartbeat > lease_ttl_s / 2
+
+    def _available_after_s(self, *, reaper_interval_s: float, now: float) -> float:
+        if self.state != "leased" or self.expires_at is None:
+            return 0.0
+        return max(0.0, self.expires_at - now) + reaper_interval_s
 
 
 @dataclass
@@ -92,17 +120,23 @@ class Broker:
         self,
         *,
         lease_ttl_s: float = DEFAULT_LEASE_TTL_S,
+        reaper_interval_s: float = DEFAULT_REAPER_INTERVAL_S,
         reset_fn: ResetFn | None = None,
     ) -> None:
         self._records: dict[int, LeaseRecord] = {}
         self._lock = asyncio.Lock()
         self._lease_ttl_s = lease_ttl_s
+        self._reaper_interval_s = reaper_interval_s
         self._reaped_log: list[_Reaped] = []
         self._reset_fn = reset_fn
 
     @property
     def lease_ttl_s(self) -> float:
         return self._lease_ttl_s
+
+    @property
+    def reaper_interval_s(self) -> float:
+        return self._reaper_interval_s
 
     def register(
         self,
@@ -118,6 +152,9 @@ class Broker:
         cdp_window_id: int | None = None,
         cdp_target_id: str | None = None,
         calibration_note: str | None = None,
+        cua_app_bundle_id: str | None = None,
+        cua_app_path: str | None = None,
+        cua_app_name: str | None = None,
     ) -> LeaseRecord:
         """Register a discovered browser into the pool."""
         rec = LeaseRecord(
@@ -132,12 +169,23 @@ class Broker:
             cdp_window_id=cdp_window_id,
             cdp_target_id=cdp_target_id,
             calibration_note=calibration_note,
+            cua_app_bundle_id=cua_app_bundle_id,
+            cua_app_path=cua_app_path,
+            cua_app_name=cua_app_name,
         )
         self._records[slot] = rec
         return rec
 
     def snapshot(self) -> list[dict[str, object]]:
-        return [rec.to_public() for rec in sorted(self._records.values(), key=lambda r: r.slot)]
+        now = time.time()
+        return [
+            rec.to_public(
+                lease_ttl_s=self._lease_ttl_s,
+                reaper_interval_s=self._reaper_interval_s,
+                now=now,
+            )
+            for rec in sorted(self._records.values(), key=lambda r: r.slot)
+        ]
 
     def pool_size(self) -> int:
         return len(self._records)
@@ -255,10 +303,16 @@ class Broker:
         rec.last_heartbeat = None
 
 
-async def reaper_loop(broker: Broker, *, interval_s: float = 2.0, stop: asyncio.Event) -> None:
+async def reaper_loop(
+    broker: Broker,
+    *,
+    interval_s: float | None = None,
+    stop: asyncio.Event,
+) -> None:
     """Background task: every `interval_s`, reap expired leases. Logs to stdout
     so the daemon operator can see reclamations as they happen.
     """
+    interval_s = broker.reaper_interval_s if interval_s is None else interval_s
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval_s)

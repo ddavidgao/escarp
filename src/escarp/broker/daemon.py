@@ -32,6 +32,7 @@ from aiohttp import web
 from escarp.broker.api import DEFAULT_PORT, bind_with_shift, build_app
 from escarp.broker.browser import reset_browser_state
 from escarp.broker.calibration import calibrate_slot
+from escarp.broker.cua_apps import existing_cua_slot_app
 from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
@@ -140,23 +141,46 @@ async def run_daemon(
                 stale_closed = -1
                 print(f"[slot {browser.slot}] startup reset failed: {exc}", file=sys.stderr)
 
-            calib = await calibrate_slot(slot=browser.slot, browser_ws_url=browser.cdp_ws_url)
+            cua_app = existing_cua_slot_app(browser.slot)
+            if cua_app is None:
+                calib = await calibrate_slot(slot=browser.slot, browser_ws_url=browser.cdp_ws_url)
+                os_window_id = calib.os_window_id
+                owner_pid = calib.owner_pid
+                bounds = calib.geom.as_bounds() if calib.succeeded() else None
+                cdp_window_id = calib.cdp_window_id
+                cdp_target_id = calib.cdp_target_id
+                calibration_note = calib.failed_reason
+            else:
+                # Native CUA targets the per-slot app bundle, not a
+                # kCGWindowNumber. The old calibration path intentionally
+                # resizes windows via CDP to bind CDP -> CGWindow; doing that
+                # here is both unnecessary and visibly disruptive.
+                os_window_id = None
+                owner_pid = None
+                bounds = None
+                cdp_window_id = None
+                cdp_target_id = None
+                calibration_note = "CUA app identity mode; OS-window calibration skipped"
             broker.register(
                 slot=browser.slot,
                 cdp_port=browser.cdp_port,
                 cdp_ws_url=browser.cdp_ws_url,
                 pid=-1,
-                os_window_id=calib.os_window_id,
-                owner_pid=calib.owner_pid,
-                bounds=calib.geom.as_bounds() if calib.succeeded() else None,
-                cdp_window_id=calib.cdp_window_id,
-                cdp_target_id=calib.cdp_target_id,
-                calibration_note=calib.failed_reason,
+                os_window_id=os_window_id,
+                owner_pid=owner_pid,
+                bounds=bounds,
+                cdp_window_id=cdp_window_id,
+                cdp_target_id=cdp_target_id,
+                calibration_note=calibration_note,
+                cua_app_bundle_id=cua_app.bundle_id if cua_app else None,
+                cua_app_path=str(cua_app.app_path) if cua_app else None,
+                cua_app_name=cua_app.display_name if cua_app else None,
             )
             print(
                 f"[slot {browser.slot}] discovered  reset_closed={stale_closed}"
-                f"  os_window_id={calib.os_window_id}  owner_pid={calib.owner_pid}"
-                + (f"  calib_warn={calib.failed_reason}" if calib.failed_reason else ""),
+                f"  os_window_id={os_window_id}  owner_pid={owner_pid}"
+                + (f"  cua_app={cua_app.bundle_id}" if cua_app else "")
+                + (f"  calib_warn={calibration_note}" if calibration_note else ""),
                 flush=True,
             )
 
