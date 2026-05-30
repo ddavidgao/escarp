@@ -19,7 +19,6 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 DEFAULT_PATH = Path(os.environ.get("ESCARP_LEASES_FILE", str(Path.home() / ".escarp" / "leases.json")))
 
 

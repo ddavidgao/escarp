@@ -58,6 +58,16 @@ class LeaseRecord:
     acquired_at: float | None = None
     expires_at: float | None = None
     last_heartbeat: float | None = None
+    # Calibrated at daemon startup. The OS-level window identity is the load-
+    # bearing primitive: kCGWindowNumber on macOS, equivalent on other OSes
+    # eventually. Surfaced to API consumers as `os_window_id`. Populated only
+    # when calibration could bind the slot's CDP window to a real OS window.
+    os_window_id: int | None = None
+    owner_pid: int | None = None
+    bounds: tuple[float, float, float, float] | None = None
+    cdp_window_id: int | None = None
+    cdp_target_id: str | None = None
+    calibration_note: str | None = None
 
     def to_public(self) -> dict[str, object]:
         d = asdict(self)
@@ -102,16 +112,26 @@ class Broker:
         cdp_ws_url: str,
         pid: int,
         tier: str = "autonomous",
+        os_window_id: int | None = None,
+        owner_pid: int | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        cdp_window_id: int | None = None,
+        cdp_target_id: str | None = None,
+        calibration_note: str | None = None,
     ) -> LeaseRecord:
-        """Register a launched browser into the pool. Called once per slot at
-        daemon startup; not protected by the asyncio lock because daemon setup
-        runs before the HTTP server starts accepting requests."""
+        """Register a discovered browser into the pool."""
         rec = LeaseRecord(
             slot=slot,
             cdp_port=cdp_port,
             cdp_ws_url=cdp_ws_url,
             pid=pid,
             tier=tier,
+            os_window_id=os_window_id,
+            owner_pid=owner_pid,
+            bounds=bounds,
+            cdp_window_id=cdp_window_id,
+            cdp_target_id=cdp_target_id,
+            calibration_note=calibration_note,
         )
         self._records[slot] = rec
         return rec

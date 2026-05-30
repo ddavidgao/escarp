@@ -23,7 +23,6 @@ import httpx
 from escarp import lease_state
 from escarp.broker.api import DEFAULT_PORT
 
-
 BROKER_URL_DEFAULT = f"http://127.0.0.1:{DEFAULT_PORT}"
 
 
@@ -82,15 +81,19 @@ def main(argv: list[str] | None = None) -> int:
         if not matches:
             print(f"no local leases recorded with holder={args.holder!r}.", file=sys.stderr)
             return 2
-        for l in matches:
-            leases_to_release.append((l.lease_token, l.slot, f"slot {l.slot} ({l.holder!r})"))
+        for lease in matches:
+            leases_to_release.append(
+                (lease.lease_token, lease.slot, f"slot {lease.slot} ({lease.holder!r})")
+            )
     elif args.mine:
         all_local = lease_state.all_leases()
         if not all_local:
             print("no local leases recorded. nothing to release.")
             return 0
-        for l in all_local:
-            leases_to_release.append((l.lease_token, l.slot, f"slot {l.slot} ({l.holder!r})"))
+        for lease in all_local:
+            leases_to_release.append(
+                (lease.lease_token, lease.slot, f"slot {lease.slot} ({lease.holder!r})")
+            )
 
     rc = 0
     for token, slot, label in leases_to_release:

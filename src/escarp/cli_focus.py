@@ -42,17 +42,36 @@ async def _run(slot: int) -> int:
         )
         return 2
 
+    bounds = target.get("bounds")
+    bounds_tuple = tuple(bounds) if bounds is not None else None
     result = await focus_slot(
         slot=slot,
         cdp_port=target["cdp_port"],
         cdp_ws_url=target["cdp_ws_url"],
+        cg_window_number=target.get("os_window_id"),
+        cg_window_owner_pid=target.get("owner_pid"),
+        cg_window_bounds=bounds_tuple,  # type: ignore[arg-type]
     )
 
     print(f"slot {slot}  cdp_port={target['cdp_port']}  title='{result.title_set}'")
-    print(f"  CDP bring_to_front: {'ok' if result.cdp_bring_to_front else 'FAIL'}")
+    print(f"  CDP bring_to_front:    {'ok' if result.cdp_bring_to_front else 'FAIL'}")
     if sys.platform == "darwin":
-        print(f"  macOS app activate: {'ok' if result.os_app_activated else 'FAIL'}")
-        print(f"  macOS window promote: {'ok' if result.os_window_promoted else 'FAIL'}")
+        print(f"  AX raise (exact win):  {'ok' if result.ax_raised else 'FAIL'}")
+        print(f"  macOS app activate:    {'ok' if result.os_app_activated else 'FAIL'}")
+        print(
+            f"  verified frontmost:    "
+            f"{'OK' if result.verified_frontmost else 'FAIL'}"
+            + (
+                f"  (slot's window = {result.cg_window_number}, "
+                f"actually frontmost = {result.actually_frontmost_cg_window})"
+                if not result.verified_frontmost and result.cg_window_number is not None
+                else ""
+            )
+        )
     for note in result.notes:
         print(f"  note: {note}")
+    print(
+        f"\noverall: {'ok' if result.succeeded() else 'FAIL'}"
+        + (" -- safe to hand off to Codex CUA" if result.succeeded() else " -- DO NOT claim CUA bridge for this slot")
+    )
     return 0 if result.succeeded() else 1

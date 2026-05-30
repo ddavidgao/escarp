@@ -31,6 +31,7 @@ from aiohttp import web
 
 from escarp.broker.api import DEFAULT_PORT, bind_with_shift, build_app
 from escarp.broker.browser import reset_browser_state
+from escarp.broker.calibration import calibrate_slot
 from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
@@ -132,20 +133,30 @@ async def run_daemon(
                 continue
             leases.append(lease)
             browsers.append(browser)
-            broker.register(
-                slot=browser.slot,
-                cdp_port=browser.cdp_port,
-                cdp_ws_url=browser.cdp_ws_url,
-                pid=-1,  # we don't own this process
-            )
+
             try:
                 stale_closed = await reset_browser_state(browser.cdp_port)
             except Exception as exc:
                 stale_closed = -1
                 print(f"[slot {browser.slot}] startup reset failed: {exc}", file=sys.stderr)
+
+            calib = await calibrate_slot(slot=browser.slot, browser_ws_url=browser.cdp_ws_url)
+            broker.register(
+                slot=browser.slot,
+                cdp_port=browser.cdp_port,
+                cdp_ws_url=browser.cdp_ws_url,
+                pid=-1,
+                os_window_id=calib.os_window_id,
+                owner_pid=calib.owner_pid,
+                bounds=calib.geom.as_bounds() if calib.succeeded() else None,
+                cdp_window_id=calib.cdp_window_id,
+                cdp_target_id=calib.cdp_target_id,
+                calibration_note=calib.failed_reason,
+            )
             print(
-                f"[slot {browser.slot}] discovered  ws={browser.cdp_ws_url}"
-                f"  (reset closed {stale_closed} stale tab(s))",
+                f"[slot {browser.slot}] discovered  reset_closed={stale_closed}"
+                f"  os_window_id={calib.os_window_id}  owner_pid={calib.owner_pid}"
+                + (f"  calib_warn={calib.failed_reason}" if calib.failed_reason else ""),
                 flush=True,
             )
 

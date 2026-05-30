@@ -27,7 +27,6 @@ from escarp import lease_state
 from escarp.broker.api import DEFAULT_PORT
 from escarp.broker.focus import focus_slot, slot_title
 
-
 BROKER_URL_DEFAULT = f"http://127.0.0.1:{DEFAULT_PORT}"
 
 
@@ -120,5 +119,5 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print("When done:")
     print(f"  escarp release --slot {record['slot']}")
-    print(f"  (or: escarp release --mine)")
+    print("  (or: escarp release --mine)")
     return 0

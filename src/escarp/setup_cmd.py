@@ -31,7 +31,6 @@ import httpx
 from escarp.broker.api import DEFAULT_PORT
 from escarp.broker.browser import find_cft_binary
 
-
 BROKER_URL_DEFAULT = f"http://127.0.0.1:{DEFAULT_PORT}"
 
 
@@ -308,13 +307,13 @@ def setup_codex(args: list[str] | None = None) -> int:
     print("\ndone. Codex CUA ready.")
     print()
     print("Next steps:")
-    print(f"  1. In a Codex session, call the tools:  escarp_status, escarp_acquire, escarp_release.")
-    print(f"  2. After escarp_acquire, run `escarp focus <slot>` from a separate shell so the")
-    print(f"     leased window is the OS-foreground key window. Codex CUA then drives that window.")
+    print("  1. In a Codex session, call the tools:  escarp_status, escarp_acquire, escarp_release.")
+    print("  2. After escarp_acquire, run `escarp focus <slot>` from a separate shell so the")
+    print("     leased window is the OS-foreground key window. Codex CUA then drives that window.")
     print()
-    print(f"  Caveat: Codex CUA addresses by app, not by window. Only one CUA-driven CfT window")
-    print(f"  per app bundle is reliably addressable at a time. Two concurrent CUA agents on")
-    print(f"  separate slots is NOT supported today -- use the CDP fallback for that.")
+    print("  Caveat: Codex CUA addresses by app, not by window. Only one CUA-driven CfT window")
+    print("  per app bundle is reliably addressable at a time. Two concurrent CUA agents on")
+    print("  separate slots is NOT supported today -- use the CDP fallback for that.")
     return 0
 
 
@@ -343,11 +342,11 @@ def setup_claude(args: list[str] | None = None) -> int:
     print("\ndone. Claude Code wired to escarp.")
     print()
     print("Next steps:")
-    print(f"  1. In a Claude Code session, call:  escarp_status, escarp_acquire, escarp_release.")
-    print(f"  2. After acquire, drive the leased browser via Playwright connect_over_cdp or")
-    print(f"     register chrome-devtools-mcp separately with --browser-url for tool-based driving.")
-    print(f"  3. Claude Code has no native CUA today, so the CDP path is the only driver path.")
-    print(f"     For visible-cursor / native-dialog UX, use Codex CUA via `escarp setup codex`.")
+    print("  1. In a Claude Code session, call:  escarp_status, escarp_acquire, escarp_release.")
+    print("  2. After acquire, drive the leased browser via Playwright connect_over_cdp or")
+    print("     register chrome-devtools-mcp separately with --browser-url for tool-based driving.")
+    print("  3. Claude Code has no native CUA today, so the CDP path is the only driver path.")
+    print("     For visible-cursor / native-dialog UX, use Codex CUA via `escarp setup codex`.")
     return 0
 
 
