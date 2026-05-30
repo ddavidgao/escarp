@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> int:
         "daemon",
         help="discover already-running chromes and broker leases against them.",
     )
+    focus_parser = sub.add_parser(
+        "focus",
+        help="bring a slot's CfT window to the OS foreground (CUA integration primitive).",
+    )
+    focus_parser.add_argument("slot", type=int, help="slot index to focus")
 
     args, rest = parser.parse_known_args(argv)
 
@@ -33,6 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "daemon":
         from escarp.broker.daemon import main as daemon_main
         return daemon_main(rest)
+    if args.command == "focus":
+        from escarp.cli_focus import main as focus_main
+        return focus_main(args.slot)
 
     parser.print_help()
     return 0
