@@ -6,3 +6,11 @@ dist/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# v2: Chrome for Testing dropped here by @puppeteer/browsers during local dev.
+# Production install path is ~/.escarp/chrome/ (daemon-managed on first run).
+chrome/
+
+# v2: ephemeral profile/state dirs used by the broker daemon.
+.escarp/
+
