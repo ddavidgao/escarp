@@ -1,8 +1,15 @@
-"""Minimal daemon entry point.
+"""Broker daemon: launches the browser pool, exposes the HTTP API, runs the reaper.
 
-v2-MVP scope: stand up N persistent CfT windows, log their CDP URLs, hold
-open until SIGINT/SIGTERM, then shut them down cleanly. No lease state, no
-MCP shim yet — those land in Phase 3 and Phase 4.
+End-to-end shape for v2-MVP:
+
+    [user] $ escarp daemon
+        |
+        +-- claim N slot locks (flock)
+        +-- launch N detached CfT processes (one per slot)
+        +-- Broker registers each browser
+        +-- aiohttp server starts on 127.0.0.1:7878
+        +-- reaper task starts (sweeps every 2s)
+        +-- ^C -> cancel reaper, close server, SIGTERM all browsers, release locks
 """
 
 from __future__ import annotations
@@ -13,6 +20,9 @@ import signal
 import sys
 from pathlib import Path
 
+from aiohttp import web
+
+from escarp.broker.api import DEFAULT_PORT, bind_with_shift, build_app
 from escarp.broker.browser import (
     BrowserLaunchError,
     ManagedBrowser,
@@ -20,23 +30,21 @@ from escarp.broker.browser import (
     launch_cft,
     shutdown,
 )
+from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
 
 
 DEFAULT_POOL_SIZE = 4
 
 
-def _pool_size_from_env() -> int:
-    raw = os.environ.get("ESCARP_POOL_SIZE")
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
     if raw is None:
-        return DEFAULT_POOL_SIZE
+        return default
     try:
-        n = int(raw)
+        return int(raw)
     except ValueError as exc:
-        raise SystemExit(f"ESCARP_POOL_SIZE must be an integer, got {raw!r}") from exc
-    if n < 1:
-        raise SystemExit(f"ESCARP_POOL_SIZE must be >= 1, got {n}")
-    return n
+        raise SystemExit(f"{name} must be an integer, got {raw!r}") from exc
 
 
 def _format_table(leases: list[SlotLease], browsers: list[ManagedBrowser]) -> str:
@@ -53,9 +61,23 @@ def _format_table(leases: list[SlotLease], browsers: list[ManagedBrowser]) -> st
     return "\n".join(rows)
 
 
-async def run_daemon(pool_size: int, cft_binary: Path) -> int:
+async def _serve_http(broker: Broker, api_port: int) -> tuple[web.AppRunner, int]:
+    app = build_app(broker)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    sock, actual_port = bind_with_shift("127.0.0.1", api_port)
+    site = web.SockSite(runner, sock)
+    await site.start()
+    return runner, actual_port
+
+
+async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_s: float) -> int:
     leases: list[SlotLease] = []
     browsers: list[ManagedBrowser] = []
+    broker = Broker(lease_ttl_s=lease_ttl_s)
+    runner: web.AppRunner | None = None
+    reaper_task: asyncio.Task[None] | None = None
+    stop_event = asyncio.Event()
 
     try:
         for slot in range(pool_size):
@@ -77,25 +99,45 @@ async def run_daemon(pool_size: int, cft_binary: Path) -> int:
                 continue
             leases.append(lease)
             browsers.append(browser)
+            broker.register(
+                slot=slot,
+                cdp_port=browser.cdp_port,
+                cdp_ws_url=browser.cdp_ws_url,
+                pid=browser.pid,
+            )
             print(f"[slot {slot}] up  pid={browser.pid}  ws={browser.cdp_ws_url}")
 
         if not browsers:
             print("no browsers launched; exiting", file=sys.stderr)
             return 1
 
+        runner, actual_port = await _serve_http(broker, api_port)
+        reaper_task = asyncio.create_task(reaper_loop(broker, stop=stop_event))
+
         print()
         print(_format_table(leases, browsers))
+        print()
+        print(f"broker http api:  http://127.0.0.1:{actual_port}")
+        print(f"lease ttl:        {lease_ttl_s}s   reaper interval: 2s")
+        print(f"try: curl http://127.0.0.1:{actual_port}/status | jq")
         print(f"\npool of {len(browsers)} ready. ctrl-c to shut down.\n")
 
-        stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop_event.set)
 
         await stop_event.wait()
-        print("\nshutdown signal received, closing browsers...")
+        print("\nshutdown signal received, closing broker + browsers...")
         return 0
     finally:
+        stop_event.set()
+        if reaper_task is not None:
+            try:
+                await asyncio.wait_for(reaper_task, timeout=3.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                reaper_task.cancel()
+        if runner is not None:
+            await runner.cleanup()
         for browser in browsers:
             shutdown(browser)
         for lease in leases:
@@ -104,7 +146,12 @@ async def run_daemon(pool_size: int, cft_binary: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    pool_size = _pool_size_from_env()
+    pool_size = _env_int("ESCARP_POOL_SIZE", DEFAULT_POOL_SIZE)
+    if pool_size < 1:
+        raise SystemExit(f"ESCARP_POOL_SIZE must be >= 1, got {pool_size}")
+    api_port = _env_int("ESCARP_API_PORT", DEFAULT_PORT)
+    lease_ttl_s = float(os.environ.get("ESCARP_LEASE_TTL_S", "60"))
+
     cft = find_cft_binary()
     if cft is None:
         print(
@@ -118,6 +165,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"using CfT binary: {cft}")
     print(f"pool size: {pool_size}\n")
     try:
-        return asyncio.run(run_daemon(pool_size, cft))
+        return asyncio.run(run_daemon(pool_size, cft, api_port, lease_ttl_s))
     except KeyboardInterrupt:
         return 0

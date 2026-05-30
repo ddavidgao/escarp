@@ -15,6 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+    "aiohttp>=3.9",
     "cryptography>=42.0",
     "httpx>=0.28.1",
 ]
@@ -37,6 +38,7 @@ dev = [
 
 [project.scripts]
 escarp = "escarp.cli:main"
+escarp-mcp = "escarp.mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
