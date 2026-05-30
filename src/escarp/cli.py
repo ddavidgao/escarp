@@ -34,6 +34,16 @@ def main(argv: list[str] | None = None) -> int:
         help="one-command MCP wiring + smoke test for an agent (codex, claude-code).",
     )
     setup_parser.add_argument("agent", help="codex (alias: codex-cua) or claude-code (alias: claude)")
+    sub.add_parser(
+        "acquire",
+        help="lease a slot, optionally --focus the window and --prompt a CUA preamble.",
+        add_help=False,
+    )
+    sub.add_parser(
+        "release",
+        help="release leases held by this machine (--mine / --slot / --holder / --token).",
+        add_help=False,
+    )
 
     args, rest = parser.parse_known_args(argv)
 
@@ -49,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "setup":
         from escarp.setup_cmd import main as setup_main
         return setup_main([args.agent, *rest])
+    if args.command == "acquire":
+        from escarp.cli_acquire import main as acquire_main
+        return acquire_main(rest)
+    if args.command == "release":
+        from escarp.cli_release import main as release_main
+        return release_main(rest)
 
     parser.print_help()
     return 0
