@@ -127,3 +127,41 @@ def test_cua_prompt_prefers_per_slot_bundle_id() -> None:
     assert 'bundle identifier "dev.escarp.chrome.slot1"' in prompt
     assert "Escarp Chrome Slot 1" in prompt
     assert "currently frontmost Chrome for Testing window" not in prompt
+
+
+def test_acquire_hold_heartbeats_then_releases_on_ctrl_c(monkeypatch, capsys) -> None:
+    heartbeat = _lease_record() | {"expires_at": 1234567950.0}
+    post = Mock(
+        side_effect=[
+            FakeResponse(_lease_record()),
+            FakeResponse(heartbeat),
+            FakeResponse({"state": "free"}),
+        ]
+    )
+    get = Mock(return_value=FakeResponse({"lease_ttl_s": 60.0, "slots": []}))
+    sleeps = 0
+    removed_slots: list[int] = []
+
+    def fake_sleep(_seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli_acquire.httpx, "post", post)
+    monkeypatch.setattr(cli_acquire.httpx, "get", get)
+    monkeypatch.setattr(cli_acquire.time, "sleep", fake_sleep)
+    monkeypatch.setattr(cli_acquire.lease_state, "add", lambda lease: None)
+    monkeypatch.setattr(cli_acquire.lease_state, "remove_by_slot", lambda slot: removed_slots.append(slot))
+
+    rc = cli_acquire.main(["--holder", "codex-cua-demo", "--slot", "1", "--prompt", "--hold"])
+    output = capsys.readouterr()
+
+    assert rc == 130
+    assert "Holding lease for slot 1" in output.out
+    assert "heartbeat ok" in output.out
+    assert "Released." in output.out
+    assert post.call_args_list[1].args[0].endswith("/heartbeat")
+    assert post.call_args_list[1].kwargs["json"] == {"lease_token": "tok-1"}
+    assert post.call_args_list[2].args[0].endswith("/release")
+    assert removed_slots == [1]

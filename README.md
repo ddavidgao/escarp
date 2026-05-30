@@ -56,9 +56,9 @@ Every field after `verified_*` is *queried live* — not from cached state.
 Lease + drive a window:
 
 ```bash
-escarp acquire --holder me --focus --prompt
+escarp acquire --holder me --prompt --hold
 # ... drive via Codex Desktop / Playwright / chrome-devtools-mcp ...
-escarp release --mine
+# press Ctrl-C in the acquire terminal when done; it releases and resets the slot
 ```
 
 ## Commands
@@ -68,7 +68,7 @@ escarp release --mine
 | `escarp launch-pool [--cua-apps]` | Spawn N detached Chrome for Testing slots. One-shot; chromes outlive this command. Idempotent (skips slots already listening). `--cua-apps` creates per-slot macOS app bundle identities so native Codex CUA can target slots as separate apps. |
 | `escarp daemon` | Discover live chromes, broker leases on `127.0.0.1:7878`, run the reaper. In CUA app mode it records the per-slot bundle identity and avoids resizing windows; otherwise it calibrates each slot to an OS-window identity. Does NOT own chrome lifecycles. |
 | **`escarp window <slot>`** | **Print a slot's identity.** In CUA app mode this is the per-slot app bundle ID. In OS-window mode it also returns `os_window_id`, owner_pid, bounds, and live verification fields. Supports `--json` and `--verify-key` for OS-window mode. |
-| `escarp acquire --holder X [--focus] [--prompt]` | Lease a slot. Persists token to `~/.escarp/leases.json`. |
+| `escarp acquire --holder X [--focus] [--prompt] [--hold]` | Lease a slot. Persists token to `~/.escarp/leases.json`. `--hold` heartbeats in the foreground until Ctrl-C, then releases the lease. |
 | `escarp release {--mine \| --slot N \| --holder NAME \| --token T}` | Token-free release for humans. |
 | `escarp focus <slot>` | Best-effort helper that uses the OS-window identity to bring a slot's window forward. CDP `Page.bringToFront` + `osascript activate` + AX raise by geometric match, with post-focus verification against `os_window_id`. Reports success only when the identity check confirms the right window is key. |
 | `escarp setup codex` | Idempotent: preflight (CfT, daemon, pool, MCP path, codex CLI), register `escarp-mcp`, smoke test. |
@@ -137,8 +137,8 @@ diverge.
 
 Escarp's job for native CUA work is therefore: **lease the slot, expose its
 bundle ID, and keep the lease alive while the agent is using it.** The prompt
-from `escarp acquire --prompt` tells Codex CUA to target that bundle ID
-directly.
+from `escarp acquire --prompt --hold` tells Codex CUA to target that bundle ID
+directly and keeps the lease alive while the terminal command is running.
 
 For Claude Code today, Escarp validates cleanly through MCP/CDP
 (`escarp setup claude-code` and the leased `cdp_ws_url`). If a Claude Code
@@ -176,9 +176,11 @@ inherits across holders.
 
 Lease liveness is broker-owned. Heartbeat is `POST /heartbeat` with the secret
 lease token; a valid heartbeat refreshes `last_heartbeat` and extends
-`expires_at`. MCP shims send it automatically at `TTL / 3`. If a holder stops
-heartbeating, the slot is not stolen by another agent; it becomes reclaimable
-only when the broker reaper observes that `expires_at` has passed.
+`expires_at`. MCP shims send it automatically at `TTL / 3`; CLI native-CUA
+sessions should use `escarp acquire --prompt --hold`, which does the same in
+the foreground and releases on Ctrl-C. If a holder stops heartbeating, the slot
+is not stolen by another agent; it becomes reclaimable only when the broker
+reaper observes that `expires_at` has passed.
 
 See [V2_PLAN.md](V2_PLAN.md) for the v0→v2 design notes and
 [`research/cua_targeting.md`](research/cua_targeting.md) for the CUA
@@ -200,9 +202,9 @@ Native-CUA flow:
 ```bash
 escarp launch-pool --pool-size 2 --cua-apps
 ESCARP_POOL_SIZE=2 escarp daemon
-escarp acquire --slot 0 --holder cua-demo --prompt
+escarp acquire --slot 0 --holder cua-demo --prompt --hold
 # paste the printed bundle-ID preamble into Codex Desktop, append a task
-escarp release --mine
+# press Ctrl-C here when done; escarp releases and resets the slot
 ```
 
 ## Configuration
@@ -231,7 +233,7 @@ slot s  ->  frontend  = 3000 + s*10
 
 ## Status
 
-v1.2.0.
+v1.2.1.
 
 **Claims that hold:**
 - Each native-CUA slot can have a stable per-slot app bundle identity on macOS (`dev.escarp.chrome.slotN`).

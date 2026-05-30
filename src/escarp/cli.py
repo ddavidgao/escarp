@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     setup_parser.add_argument("agent", help="codex (alias: codex-cua) or claude-code (alias: claude)")
     sub.add_parser(
         "acquire",
-        help="lease a slot, optionally --focus the window and --prompt a CUA preamble.",
+        help="lease a slot, optionally --prompt a CUA preamble and --hold heartbeats.",
         add_help=False,
     )
     sub.add_parser(

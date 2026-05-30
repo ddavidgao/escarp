@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 
 import httpx
 
@@ -44,6 +45,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prompt",
         action="store_true",
         help="emit a paste-ready Codex CUA prompt preamble that targets the focused window",
+    )
+    parser.add_argument(
+        "--hold",
+        action="store_true",
+        help=(
+            "keep heartbeating this lease in the foreground until Ctrl-C, then release it; "
+            "recommended with --prompt for native CUA sessions"
+        ),
     )
     return parser
 
@@ -90,6 +99,54 @@ def _release_acquired(record: dict) -> None:
         )
     finally:
         lease_state.remove_by_slot(record["slot"])
+
+
+def _lease_ttl_s(default: float = 60.0) -> float:
+    try:
+        resp = httpx.get(f"{BROKER_URL_DEFAULT}/status", timeout=3.0)
+        resp.raise_for_status()
+        return float(resp.json().get("lease_ttl_s", default))
+    except Exception:
+        return default
+
+
+def _heartbeat(record: dict) -> dict:
+    resp = httpx.post(
+        f"{BROKER_URL_DEFAULT}/heartbeat",
+        json={"lease_token": record["lease_token"]},
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _hold_until_interrupted(record: dict) -> int:
+    interval_s = max(1.0, _lease_ttl_s() / 3)
+    print()
+    print(
+        f"Holding lease for slot {record['slot']}; heartbeating every {interval_s:.0f}s. "
+        "Press Ctrl-C when the CUA task is done to release and reset the slot."
+    )
+    try:
+        while True:
+            time.sleep(interval_s)
+            refreshed = _heartbeat(record)
+            record["expires_at"] = refreshed.get("expires_at", record.get("expires_at"))
+            print(f"  heartbeat ok; expires_at={record['expires_at']:.0f}", flush=True)
+    except KeyboardInterrupt:
+        print()
+        print(f"Releasing slot {record['slot']}...")
+        _release_acquired(record)
+        print("Released.")
+        return 130
+    except httpx.HTTPError as exc:
+        print()
+        print(
+            f"heartbeat failed; this process no longer has a valid live lease: {exc}",
+            file=sys.stderr,
+        )
+        lease_state.remove_by_slot(record["slot"])
+        return 5
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,6 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Paste this into Codex CUA (then append your task in the bracketed spot):")
         print()
         print(f'  "{_cua_prompt_for(record)}"')
+
+    if args.hold:
+        return _hold_until_interrupted(record)
 
     print()
     print("When done:")
