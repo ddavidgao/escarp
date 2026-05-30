@@ -28,6 +28,7 @@ from escarp.broker.browser import (
     ManagedBrowser,
     find_cft_binary,
     launch_cft,
+    reset_browser_state,
     shutdown,
 )
 from escarp.broker.lease import Broker, reaper_loop
@@ -74,7 +75,12 @@ async def _serve_http(broker: Broker, api_port: int) -> tuple[web.AppRunner, int
 async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_s: float) -> int:
     leases: list[SlotLease] = []
     browsers: list[ManagedBrowser] = []
-    broker = Broker(lease_ttl_s=lease_ttl_s)
+
+    async def reset_for_port(cdp_port: int) -> None:
+        closed = await reset_browser_state(cdp_port)
+        print(f"[reset] cdp_port={cdp_port} closed {closed} stale tab(s)", flush=True)
+
+    broker = Broker(lease_ttl_s=lease_ttl_s, reset_fn=reset_for_port)
     runner: web.AppRunner | None = None
     reaper_task: asyncio.Task[None] | None = None
     stop_event = asyncio.Event()
@@ -105,7 +111,19 @@ async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_
                 cdp_ws_url=browser.cdp_ws_url,
                 pid=browser.pid,
             )
-            print(f"[slot {slot}] up  pid={browser.pid}  ws={browser.cdp_ws_url}")
+            # Reset on startup so any stale session-restored tabs from prior runs
+            # don't leak into this daemon's pool. The lease boundary is also
+            # reset (see Broker.release / Broker.reap), but startup is the only
+            # time the prior holder is "the previous daemon."
+            try:
+                stale_closed = await reset_browser_state(browser.cdp_port)
+            except Exception as exc:
+                stale_closed = -1
+                print(f"[slot {slot}] reset on startup failed: {exc}", file=sys.stderr)
+            print(
+                f"[slot {slot}] up  pid={browser.pid}  ws={browser.cdp_ws_url}"
+                f"  (reset closed {stale_closed} stale tab(s))"
+            )
 
         if not browsers:
             print("no browsers launched; exiting", file=sys.stderr)

@@ -5,14 +5,17 @@ sees this state machine directly -- the MCP shim does, on the model's behalf.
 
 Concurrency: all mutating methods hold an asyncio.Lock so concurrent acquire/
 release/heartbeat calls (which can arrive from the HTTP layer in any order)
-serialize cleanly. The reaper takes the same lock.
+serialize cleanly. The reaper takes the same lock. Reset-on-release I/O runs
+OUTSIDE the lock so a slow reset can't block acquires for other slots.
 """
 
 from __future__ import annotations
 
 import asyncio
 import secrets
+import sys
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 
 
@@ -72,12 +75,21 @@ class _Reaped:
     reason: str
 
 
+ResetFn = Callable[[int], Awaitable[None]]
+
+
 class Broker:
-    def __init__(self, *, lease_ttl_s: float = DEFAULT_LEASE_TTL_S) -> None:
+    def __init__(
+        self,
+        *,
+        lease_ttl_s: float = DEFAULT_LEASE_TTL_S,
+        reset_fn: ResetFn | None = None,
+    ) -> None:
         self._records: dict[int, LeaseRecord] = {}
         self._lock = asyncio.Lock()
         self._lease_ttl_s = lease_ttl_s
         self._reaped_log: list[_Reaped] = []
+        self._reset_fn = reset_fn
 
     @property
     def lease_ttl_s(self) -> float:
@@ -158,14 +170,23 @@ class Broker:
     async def release(self, *, lease_token: str) -> LeaseRecord:
         async with self._lock:
             rec = self._find_by_token(lease_token)
+            cdp_port = rec.cdp_port
             self._reset(rec)
-            return rec
+            # snapshot the now-freed state before exiting the lock so a racing
+            # acquire on the same slot can't make our return value look leased
+            snapshot = LeaseRecord(**asdict(rec))
+        await self._invoke_reset(cdp_port, context="release")
+        return snapshot
 
     async def reap(self, *, now: float | None = None) -> list[int]:
-        """Free any leases whose expires_at has passed. Returns slot indices."""
+        """Free any leases whose expires_at has passed. Returns slot indices.
+
+        State mutation happens under the lock; reset I/O fires after the lock is
+        released so a slow chrome reset doesn't block other slots' acquires.
+        """
         now = now if now is not None else time.time()
         async with self._lock:
-            reaped: list[int] = []
+            reaped_pairs: list[tuple[int, int]] = []  # (slot, cdp_port)
             for rec in self._records.values():
                 if rec.state == "leased" and rec.expires_at is not None and rec.expires_at < now:
                     self._reaped_log.append(
@@ -175,9 +196,22 @@ class Broker:
                             reason=f"ttl expired at {rec.expires_at:.0f}",
                         )
                     )
+                    reaped_pairs.append((rec.slot, rec.cdp_port))
                     self._reset(rec)
-                    reaped.append(rec.slot)
-            return reaped
+        for _slot, port in reaped_pairs:
+            await self._invoke_reset(port, context="reap")
+        return [slot for slot, _ in reaped_pairs]
+
+    async def _invoke_reset(self, cdp_port: int, *, context: str) -> None:
+        if self._reset_fn is None:
+            return
+        try:
+            await self._reset_fn(cdp_port)
+        except Exception as exc:
+            print(
+                f"[broker] reset_fn failed during {context} on cdp_port={cdp_port}: {exc}",
+                file=sys.stderr,
+            )
 
     def _lowest_free_slot(self) -> int | None:
         for slot in sorted(self._records.keys()):

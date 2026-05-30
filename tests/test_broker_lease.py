@@ -150,3 +150,51 @@ async def test_concurrent_acquires_serialize() -> None:
     assert len(successes) == 1
     assert len(failures) == 1
     assert isinstance(failures[0], PoolExhausted)
+
+
+async def test_reset_fn_called_on_release() -> None:
+    """The state-reset hook must fire at the lease boundary -- David's
+    'no state inheritance' constraint."""
+    calls: list[int] = []
+
+    async def fake_reset(cdp_port: int) -> None:
+        calls.append(cdp_port)
+
+    broker = Broker(reset_fn=fake_reset)
+    _seed(broker, 2)
+    rec = await broker.acquire(holder="A", slot=1)
+    assert rec.lease_token is not None
+    assert calls == []  # acquire does not reset
+    await broker.release(lease_token=rec.lease_token)
+    assert calls == [9223]  # slot 1 -> cdp_port 9223
+
+
+async def test_reset_fn_called_for_each_reaped_slot() -> None:
+    calls: list[int] = []
+
+    async def fake_reset(cdp_port: int) -> None:
+        calls.append(cdp_port)
+
+    broker = Broker(lease_ttl_s=0.05, reset_fn=fake_reset)
+    _seed(broker, 2)
+    await broker.acquire(holder="A", slot=0)
+    await broker.acquire(holder="B", slot=1)
+    await asyncio.sleep(0.1)
+    reaped = await broker.reap()
+    assert sorted(reaped) == [0, 1]
+    assert sorted(calls) == [9222, 9223]
+
+
+async def test_reset_fn_exception_does_not_block_release() -> None:
+    async def angry_reset(cdp_port: int) -> None:
+        raise RuntimeError("chrome is on fire")
+
+    broker = Broker(reset_fn=angry_reset)
+    _seed(broker, 1)
+    rec = await broker.acquire(holder="A")
+    assert rec.lease_token is not None
+    released = await broker.release(lease_token=rec.lease_token)
+    assert released.state == "free"
+    # slot is reclaimable even though reset blew up
+    re_acquired = await broker.acquire(holder="B")
+    assert re_acquired.slot == 0

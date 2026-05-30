@@ -147,6 +147,48 @@ def shutdown(browser: ManagedBrowser, *, grace: float = 3.0) -> None:
     _terminate(browser.process, grace=grace)
 
 
+async def reset_browser_state(cdp_port: int, *, target_url: str = "about:blank") -> int:
+    """Reset a leased browser to a clean slate.
+
+    Per V2_PLAN.md §7 Phase 2: "on lease release, reset -- never close." Closes
+    every page-type tab except a freshly-created one navigated to target_url.
+    Internal target types (browser_ui, service_worker, etc.) are left alone --
+    those are chrome's own plumbing, not user-visible tabs.
+
+    Uses only the CfT /json HTTP endpoints (verified working in 149) -- no
+    websocket dance, no extra deps beyond httpx.
+
+    Returns the number of stale tabs closed (zero on a pristine browser).
+    """
+    import httpx  # local import keeps the sync launch_cft path light
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        # Order matters: create the new clean tab FIRST so we never close down
+        # to zero tabs (which would close the only window and kill the process).
+        new_resp = await client.put(f"http://127.0.0.1:{cdp_port}/json/new?{target_url}")
+        new_resp.raise_for_status()
+        new_id = new_resp.json()["id"]
+
+        list_resp = await client.get(f"http://127.0.0.1:{cdp_port}/json/list")
+        list_resp.raise_for_status()
+        tabs = list_resp.json()
+
+        closed = 0
+        for tab in tabs:
+            if tab.get("type") != "page" or tab.get("id") == new_id:
+                continue
+            try:
+                close_resp = await client.get(
+                    f"http://127.0.0.1:{cdp_port}/json/close/{tab['id']}"
+                )
+                if close_resp.status_code < 400:
+                    closed += 1
+            except httpx.HTTPError:
+                # Best-effort: a tab that vanished mid-loop isn't a problem.
+                pass
+        return closed
+
+
 def find_cft_binary() -> Path | None:
     """Best-effort discovery for the Chrome for Testing binary.
 
