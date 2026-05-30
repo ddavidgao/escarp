@@ -29,6 +29,11 @@ def main(argv: list[str] | None = None) -> int:
         help="bring a slot's CfT window to the OS foreground (CUA integration primitive).",
     )
     focus_parser.add_argument("slot", type=int, help="slot index to focus")
+    setup_parser = sub.add_parser(
+        "setup",
+        help="one-command MCP wiring + smoke test for an agent (codex, claude-code).",
+    )
+    setup_parser.add_argument("agent", help="codex (alias: codex-cua) or claude-code (alias: claude)")
 
     args, rest = parser.parse_known_args(argv)
 
@@ -41,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "focus":
         from escarp.cli_focus import main as focus_main
         return focus_main(args.slot)
+    if args.command == "setup":
+        from escarp.setup_cmd import main as setup_main
+        return setup_main([args.agent, *rest])
 
     parser.print_help()
     return 0
