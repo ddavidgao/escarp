@@ -30,7 +30,6 @@ from escarp.broker.lease import (
     UnknownSlot,
 )
 
-
 DEFAULT_PORT = 7878
 
 

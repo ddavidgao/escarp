@@ -25,7 +25,6 @@ from escarp.broker.browser import (
 from escarp.broker.discovery import probe
 from escarp.broker.slots import profile_dir_for_slot
 
-
 DEFAULT_POOL_SIZE = 4
 DEFAULT_CDP_BASE = 9222
 

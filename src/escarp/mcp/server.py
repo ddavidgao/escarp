@@ -31,7 +31,6 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-
 DEFAULT_BROKER_URL = "http://127.0.0.1:7878"
 HEARTBEAT_DIVISOR = 3  # heartbeat every TTL/3 seconds
 

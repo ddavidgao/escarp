@@ -23,7 +23,6 @@ from pathlib import Path
 
 import httpx
 
-
 # Locked launch flags, per V2_PLAN.md §7 Phase 2.
 _BASE_FLAGS: tuple[str, ...] = (
     "--no-first-run",

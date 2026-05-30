@@ -1,0 +1,55 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build wheel + sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: build
+        run: uv build
+
+      - name: list dist
+        run: ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI (OIDC)
+    needs: build
+    runs-on: ubuntu-latest
+    # Must match the environment configured in the pending publisher on PyPI.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/escarp
+    # Required for OIDC. The action mints a short-lived id-token that PyPI
+    # exchanges for upload credentials based on the pending-publisher binding
+    # (repo + workflow + environment).
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          print-hash: true

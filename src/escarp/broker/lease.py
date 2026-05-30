@@ -16,8 +16,7 @@ import secrets
 import sys
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field
-
+from dataclasses import asdict, dataclass
 
 # Default lease TTL: short enough that a dead agent doesn't park a slot for
 # long, long enough that a healthy agent's heartbeat cadence (~TTL/3) doesn't
@@ -244,7 +243,7 @@ async def reaper_loop(broker: Broker, *, interval_s: float = 2.0, stop: asyncio.
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval_s)
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         reaped = await broker.reap()
         if reaped:

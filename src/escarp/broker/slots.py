@@ -14,7 +14,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
 DEFAULT_LOCK_DIR = Path.home() / ".escarp" / "locks"
 DEFAULT_PROFILE_DIR = Path.home() / ".escarp" / "profiles"
 

@@ -26,7 +26,6 @@ import asyncio
 import os
 import signal
 import sys
-from pathlib import Path
 
 from aiohttp import web
 
@@ -35,7 +34,6 @@ from escarp.broker.browser import reset_browser_state
 from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
-
 
 DEFAULT_POOL_SIZE = 4
 DEFAULT_CDP_BASE_PORT = 9222
@@ -65,7 +63,6 @@ def _format_table(leases: list[SlotLease], browsers: list[DiscoveredBrowser]) ->
 
 
 async def _serve_http(broker: Broker, api_port: int) -> tuple[web.AppRunner, int]:
-    import socket as _socket
 
     app = build_app(broker)
     runner = web.AppRunner(app)
@@ -185,7 +182,7 @@ async def run_daemon(
         if reaper_task is not None:
             try:
                 await asyncio.wait_for(reaper_task, timeout=3.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 reaper_task.cancel()
         if runner is not None:
             await runner.cleanup()

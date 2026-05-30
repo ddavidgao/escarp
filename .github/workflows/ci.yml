@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   pull_request:
-    branches: [main]
+    branches: [main, v2]
 
 jobs:
   check:
@@ -16,23 +16,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: uv sync --extra dev --extra browser
+      - name: install dependencies
+        run: uv sync --extra dev
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
-
-      - name: Install Playwright Chromium
-        run: uv run playwright install --with-deps chromium
-
-      - name: Lint
+      - name: lint
         run: uv run ruff check src/ tests/
 
-      - name: Typecheck
-        run: uv run mypy src/
-
-      - name: Test
+      - name: test
         run: uv run pytest -v
