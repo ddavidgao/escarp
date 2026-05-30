@@ -1,15 +1,23 @@
-"""Broker daemon: launches the browser pool, exposes the HTTP API, runs the reaper.
+"""Broker daemon: discovers already-running browsers, brokers leases, runs reaper.
 
-End-to-end shape for v2-MVP:
+**Does NOT own chrome lifecycles.** Per V2_PLAN.md's persistence contract,
+chromes are infrastructure that exists independently. To start the chromes,
+run `escarp launch-pool` (or launchd, systemd, docker, manual shell, whatever).
+This daemon's only relationship to a chrome is "discover via /json/version,
+talk to it over CDP, never kill it."
 
-    [user] $ escarp daemon
+End-to-end shape:
+
+    [user] $ escarp launch-pool          # one-shot, exits, chromes persist
+    [user] $ escarp daemon               # discovers chromes, brokers leases
         |
-        +-- claim N slot locks (flock)
-        +-- launch N detached CfT processes (one per slot)
-        +-- Broker registers each browser
+        +-- claim N slot locks (flock)   <- "I am the broker for this pool"
+        +-- discover each slot via /json/version
+        +-- Broker.register() each discovered browser
+        +-- reset each browser to about:blank (state hygiene at boot)
         +-- aiohttp server starts on 127.0.0.1:7878
         +-- reaper task starts (sweeps every 2s)
-        +-- ^C -> cancel reaper, close server, SIGTERM all browsers, release locks
+        +-- ^C -> cancel reaper, close server, release locks. CHROMES STAY ALIVE.
 """
 
 from __future__ import annotations
@@ -23,19 +31,14 @@ from pathlib import Path
 from aiohttp import web
 
 from escarp.broker.api import DEFAULT_PORT, bind_with_shift, build_app
-from escarp.broker.browser import (
-    BrowserLaunchError,
-    ManagedBrowser,
-    find_cft_binary,
-    launch_cft,
-    reset_browser_state,
-    shutdown,
-)
+from escarp.broker.browser import reset_browser_state
+from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
 
 
 DEFAULT_POOL_SIZE = 4
+DEFAULT_CDP_BASE_PORT = 9222
 
 
 def _env_int(name: str, default: int) -> int:
@@ -48,21 +51,22 @@ def _env_int(name: str, default: int) -> int:
         raise SystemExit(f"{name} must be an integer, got {raw!r}") from exc
 
 
-def _format_table(leases: list[SlotLease], browsers: list[ManagedBrowser]) -> str:
-    rows = [f"{'slot':<6}{'cdp':<8}{'frontend':<10}{'backend':<10}{'pid':<8}cdp_ws_url"]
+def _format_table(leases: list[SlotLease], browsers: list[DiscoveredBrowser]) -> str:
+    rows = [f"{'slot':<6}{'cdp':<8}{'frontend':<10}{'backend':<10}cdp_ws_url"]
     for lease, browser in zip(leases, browsers, strict=True):
         rows.append(
             f"{lease.slot:<6}"
             f"{lease.ports.cdp:<8}"
             f"{lease.ports.frontend:<10}"
             f"{lease.ports.backend:<10}"
-            f"{browser.pid:<8}"
             f"{browser.cdp_ws_url}"
         )
     return "\n".join(rows)
 
 
 async def _serve_http(broker: Broker, api_port: int) -> tuple[web.AppRunner, int]:
+    import socket as _socket
+
     app = build_app(broker)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -72,13 +76,23 @@ async def _serve_http(broker: Broker, api_port: int) -> tuple[web.AppRunner, int
     return runner, actual_port
 
 
-async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_s: float) -> int:
+async def run_daemon(
+    *,
+    pool_size: int,
+    cdp_base_port: int,
+    api_port: int,
+    lease_ttl_s: float,
+    discovery_wait_s: float,
+) -> int:
     leases: list[SlotLease] = []
-    browsers: list[ManagedBrowser] = []
+    browsers: list[DiscoveredBrowser] = []
 
     async def reset_for_port(cdp_port: int) -> None:
-        closed = await reset_browser_state(cdp_port)
-        print(f"[reset] cdp_port={cdp_port} closed {closed} stale tab(s)", flush=True)
+        try:
+            closed = await reset_browser_state(cdp_port)
+            print(f"[reset] cdp_port={cdp_port} closed {closed} stale tab(s)", flush=True)
+        except Exception as exc:
+            print(f"[reset] cdp_port={cdp_port} failed: {exc}", file=sys.stderr, flush=True)
 
     broker = Broker(lease_ttl_s=lease_ttl_s, reset_fn=reset_for_port)
     runner: web.AppRunner | None = None
@@ -86,49 +100,63 @@ async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_
     stop_event = asyncio.Event()
 
     try:
-        for slot in range(pool_size):
+        # 1. Discover whatever's already running.
+        print(
+            f"discovering pool: slots [0, {pool_size}) on cdp_ports "
+            f"{cdp_base_port}..{cdp_base_port + pool_size - 1}",
+            flush=True,
+        )
+        discovered, missing = await discover_pool(
+            pool_size=pool_size,
+            cdp_base_port=cdp_base_port,
+            wait_for_each=discovery_wait_s,
+        )
+        for slot in missing:
+            print(
+                f"[slot {slot}] no chrome on cdp_port {cdp_base_port + slot}. "
+                f"Run `escarp launch-pool` (or start a chrome there) first.",
+                file=sys.stderr,
+                flush=True,
+            )
+        if not discovered:
+            print("nothing to broker. exiting.", file=sys.stderr, flush=True)
+            return 1
+
+        # 2. Claim slot locks for whatever's discovered; register into the broker.
+        for browser in discovered:
             try:
-                lease = claim_slot(slot)
+                lease = claim_slot(browser.slot)
             except SlotBusy as exc:
-                print(f"[slot {slot}] {exc} -- skipping", file=sys.stderr)
-                continue
-            try:
-                browser = launch_cft(
-                    slot=slot,
-                    binary=cft_binary,
-                    profile_dir=lease.profile_dir,
-                    cdp_port=lease.ports.cdp,
+                print(
+                    f"[slot {browser.slot}] another broker holds the lock for this slot. {exc}",
+                    file=sys.stderr,
+                    flush=True,
                 )
-            except BrowserLaunchError as exc:
-                print(f"[slot {slot}] launch failed: {exc}", file=sys.stderr)
-                lease.release()
                 continue
             leases.append(lease)
             browsers.append(browser)
             broker.register(
-                slot=slot,
+                slot=browser.slot,
                 cdp_port=browser.cdp_port,
                 cdp_ws_url=browser.cdp_ws_url,
-                pid=browser.pid,
+                pid=-1,  # we don't own this process
             )
-            # Reset on startup so any stale session-restored tabs from prior runs
-            # don't leak into this daemon's pool. The lease boundary is also
-            # reset (see Broker.release / Broker.reap), but startup is the only
-            # time the prior holder is "the previous daemon."
             try:
                 stale_closed = await reset_browser_state(browser.cdp_port)
             except Exception as exc:
                 stale_closed = -1
-                print(f"[slot {slot}] reset on startup failed: {exc}", file=sys.stderr)
+                print(f"[slot {browser.slot}] startup reset failed: {exc}", file=sys.stderr)
             print(
-                f"[slot {slot}] up  pid={browser.pid}  ws={browser.cdp_ws_url}"
-                f"  (reset closed {stale_closed} stale tab(s))"
+                f"[slot {browser.slot}] discovered  ws={browser.cdp_ws_url}"
+                f"  (reset closed {stale_closed} stale tab(s))",
+                flush=True,
             )
 
         if not browsers:
-            print("no browsers launched; exiting", file=sys.stderr)
+            print("no slots brokered. exiting.", file=sys.stderr, flush=True)
             return 1
 
+        # 3. HTTP + reaper.
         runner, actual_port = await _serve_http(broker, api_port)
         reaper_task = asyncio.create_task(reaper_loop(broker, stop=stop_event))
 
@@ -138,14 +166,19 @@ async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_
         print(f"broker http api:  http://127.0.0.1:{actual_port}")
         print(f"lease ttl:        {lease_ttl_s}s   reaper interval: 2s")
         print(f"try: curl http://127.0.0.1:{actual_port}/status | jq")
-        print(f"\npool of {len(browsers)} ready. ctrl-c to shut down.\n")
+        print(
+            f"\npool of {len(browsers)} brokered. chromes are NOT owned by this daemon "
+            f"and will survive ctrl-c.",
+            flush=True,
+        )
+        print("ctrl-c to release the slot locks and stop brokering.\n", flush=True)
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop_event.set)
 
         await stop_event.wait()
-        print("\nshutdown signal received, closing broker + browsers...")
+        print("\nshutdown signal received. releasing slot locks; chromes left alive.")
         return 0
     finally:
         stop_event.set()
@@ -156,33 +189,29 @@ async def run_daemon(pool_size: int, cft_binary: Path, api_port: int, lease_ttl_
                 reaper_task.cancel()
         if runner is not None:
             await runner.cleanup()
-        for browser in browsers:
-            shutdown(browser)
         for lease in leases:
             lease.release()
-        print(f"shut down {len(browsers)} browser(s).")
+        # NOTE: intentionally do NOT touch chromes. They are infrastructure.
 
 
 def main(argv: list[str] | None = None) -> int:
     pool_size = _env_int("ESCARP_POOL_SIZE", DEFAULT_POOL_SIZE)
     if pool_size < 1:
         raise SystemExit(f"ESCARP_POOL_SIZE must be >= 1, got {pool_size}")
+    cdp_base_port = _env_int("ESCARP_CDP_BASE", DEFAULT_CDP_BASE_PORT)
     api_port = _env_int("ESCARP_API_PORT", DEFAULT_PORT)
     lease_ttl_s = float(os.environ.get("ESCARP_LEASE_TTL_S", "60"))
+    discovery_wait_s = float(os.environ.get("ESCARP_DISCOVERY_WAIT_S", "0"))
 
-    cft = find_cft_binary()
-    if cft is None:
-        print(
-            "Chrome for Testing binary not found.\n"
-            "Set ESCARP_CFT_BINARY=/path/to/'Google Chrome for Testing' or run\n"
-            "  npx @puppeteer/browsers install chrome@stable\n"
-            "from the escarp repo root.",
-            file=sys.stderr,
-        )
-        return 2
-    print(f"using CfT binary: {cft}")
-    print(f"pool size: {pool_size}\n")
     try:
-        return asyncio.run(run_daemon(pool_size, cft, api_port, lease_ttl_s))
+        return asyncio.run(
+            run_daemon(
+                pool_size=pool_size,
+                cdp_base_port=cdp_base_port,
+                api_port=api_port,
+                lease_ttl_s=lease_ttl_s,
+                discovery_wait_s=discovery_wait_s,
+            )
+        )
     except KeyboardInterrupt:
         return 0

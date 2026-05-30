@@ -16,13 +16,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"escarp {__version__}")
 
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("daemon", help="run the broker daemon (pool of persistent CfT windows)")
+    sub.add_parser(
+        "launch-pool",
+        help="spawn N detached Chrome for Testing processes (one-shot, exits).",
+    )
+    sub.add_parser(
+        "daemon",
+        help="discover already-running chromes and broker leases against them.",
+    )
 
-    args = parser.parse_args(argv)
+    args, rest = parser.parse_known_args(argv)
 
+    if args.command == "launch-pool":
+        from escarp.broker.launcher import main as launch_main
+        return launch_main(rest)
     if args.command == "daemon":
         from escarp.broker.daemon import main as daemon_main
-        return daemon_main(argv)
+        return daemon_main(rest)
 
     parser.print_help()
     return 0
