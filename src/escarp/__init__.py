@@ -1,8 +1,13 @@
-"""Escarp — identity-aware runtime for AI agents."""
+"""Escarp -- identity-aware runtime for parallel coding agents.
 
-from escarp.agent import Agent
-from escarp.router import RouteDecision
-from escarp.run import run
+Public surface is the `escarp` and `escarp-mcp` CLIs and the broker's HTTP
+API on http://127.0.0.1:7878. See README.md for the quick-start.
 
-__version__ = "0.1.0"
-__all__ = ["Agent", "RouteDecision", "run", "__version__"]
+For programmatic access, import directly from the submodules:
+    from escarp.broker import claim_slot, ports_for_slot
+    from escarp.broker.lease import Broker
+    from escarp.broker.discovery import discover_pool
+"""
+
+__version__ = "1.0.0"
+__all__ = ["__version__"]
