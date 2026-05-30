@@ -9,5 +9,5 @@ For programmatic access, import directly from the submodules:
     from escarp.broker.discovery import discover_pool
 """
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 __all__ = ["__version__"]

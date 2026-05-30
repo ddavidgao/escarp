@@ -34,6 +34,12 @@ escarp daemon &             # discover them, broker leases, run reaper
 escarp setup codex          # or: setup claude-code
 ```
 
+`escarp setup codex` is a convenience check + MCP registration step. If it
+reports a Codex CLI/MCP smoke-test issue but `escarp acquire --prompt --hold`
+prints a bundle-ID prompt and the browser slots are running, the native CUA
+flow can still work. Treat setup failures as "MCP wiring needs attention," not
+as proof that the browser pool is unusable.
+
 Look at the pool:
 
 ```bash
@@ -71,7 +77,7 @@ escarp acquire --holder me --prompt --hold
 | `escarp acquire --holder X [--focus] [--prompt] [--hold]` | Lease a slot. Persists token to `~/.escarp/leases.json`. `--hold` heartbeats in the foreground until Ctrl-C, then releases the lease. |
 | `escarp release {--mine \| --slot N \| --holder NAME \| --token T}` | Token-free release for humans. |
 | `escarp focus <slot>` | Best-effort helper that uses the OS-window identity to bring a slot's window forward. CDP `Page.bringToFront` + `osascript activate` + AX raise by geometric match, with post-focus verification against `os_window_id`. Reports success only when the identity check confirms the right window is key. |
-| `escarp setup codex` | Idempotent: preflight (CfT, daemon, pool, MCP path, codex CLI), register `escarp-mcp`, smoke test. |
+| `escarp setup codex` | Convenience preflight + MCP registration. Useful but not required for the CLI native-CUA flow if `escarp acquire --prompt --hold` works. |
 | `escarp setup claude-code` | Same shape, for Claude Code. |
 
 ## The MCP shim
@@ -233,7 +239,7 @@ slot s  ->  frontend  = 3000 + s*10
 
 ## Status
 
-v1.2.1.
+v1.2.2.
 
 **Claims that hold:**
 - Each native-CUA slot can have a stable per-slot app bundle identity on macOS (`dev.escarp.chrome.slotN`).

@@ -307,13 +307,13 @@ def setup_codex(args: list[str] | None = None) -> int:
     print("\ndone. Codex CUA ready.")
     print()
     print("Next steps:")
-    print("  1. In a Codex session, call the tools:  escarp_status, escarp_acquire, escarp_release.")
-    print("  2. After escarp_acquire, run `escarp focus <slot>` from a separate shell so the")
-    print("     leased window is the OS-foreground key window. Codex CUA then drives that window.")
+    print("  1. For native visible CUA: `escarp acquire --slot N --holder NAME --prompt --hold`.")
+    print("     Paste the printed bundle-ID prompt into Codex and press Ctrl-C here when done.")
+    print("  2. For MCP/CDP: call the tools escarp_status, escarp_acquire, escarp_release.")
     print()
-    print("  Caveat: Codex CUA addresses by app, not by window. Only one CUA-driven CfT window")
-    print("  per app bundle is reliably addressable at a time. Two concurrent CUA agents on")
-    print("  separate slots is NOT supported today -- use the CDP fallback for that.")
+    print("  Note: `setup codex` validates MCP wiring. If this command reports a Codex")
+    print("  CLI/MCP issue but `escarp acquire --prompt --hold` prints a per-slot bundle")
+    print("  prompt, the native CUA browser-pool flow can still work.")
     return 0
 
 
