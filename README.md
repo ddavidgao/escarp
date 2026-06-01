@@ -40,6 +40,35 @@ prints a bundle-ID prompt and the browser slots are running, the native CUA
 flow can still work. Treat setup failures as "MCP wiring needs attention," not
 as proof that the browser pool is unusable.
 
+### Codex CUA quickstart
+
+For visible browser tasks in Codex, use Escarp's per-slot app identities and
+drive the leased slot with Codex Computer Use (CUA).
+
+```bash
+pip install escarp
+npx @puppeteer/browsers install chrome@stable
+
+escarp launch-pool --cua-apps
+escarp daemon
+escarp setup codex
+escarp docs codex-cua
+```
+
+For a one-off native-CUA session:
+
+```bash
+escarp acquire --holder codex-cua --focus --prompt --hold
+```
+
+Paste the printed prompt into Codex, then append your browser task.
+
+Important: Escarp slot acquisition alone is not the complete native-CUA
+workflow. After acquiring a slot, Codex must target the leased per-slot app
+identity, such as `Escarp Chrome Slot 0`, through Computer Use. CDP,
+Playwright, curl, and DevTools are diagnostics or automation transports, not
+the primary visible browser control path.
+
 Look at the pool:
 
 ```bash
@@ -76,6 +105,7 @@ escarp acquire --holder me --prompt --hold
 | **`escarp window <slot>`** | **Print a slot's identity.** In CUA app mode this is the per-slot app bundle ID. In OS-window mode it also returns `os_window_id`, owner_pid, bounds, and live verification fields. Supports `--json` and `--verify-key` for OS-window mode. |
 | `escarp acquire --holder X [--focus] [--prompt] [--hold]` | Lease a slot. Persists token to `~/.escarp/leases.json`. `--hold` heartbeats in the foreground until Ctrl-C, then releases the lease. |
 | `escarp release {--mine \| --slot N \| --holder NAME \| --token T}` | Token-free release for humans. |
+| `escarp docs [codex-cua]` | List bundled docs with their installed path, or print the Codex CUA quickstart so it can be pasted into Codex/runbooks. |
 | `escarp focus <slot>` | Best-effort helper that uses the OS-window identity to bring a slot's window forward. CDP `Page.bringToFront` + `osascript activate` + AX raise by geometric match, with post-focus verification against `os_window_id`. Reports success only when the identity check confirms the right window is key. |
 | `escarp setup codex` | Convenience preflight + MCP registration. Useful but not required for the CLI native-CUA flow if `escarp acquire --prompt --hold` works. |
 | `escarp setup claude-code` | Same shape, for Claude Code. |
@@ -239,7 +269,7 @@ slot s  ->  frontend  = 3000 + s*10
 
 ## Status
 
-v1.2.2.
+v1.3.0.
 
 **Claims that hold:**
 - Each native-CUA slot can have a stable per-slot app bundle identity on macOS (`dev.escarp.chrome.slotN`).

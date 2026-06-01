@@ -49,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
         help="release leases held by this machine (--mine / --slot / --holder / --token).",
         add_help=False,
     )
+    sub.add_parser(
+        "docs",
+        help="list or print bundled docs installed with the package.",
+        add_help=False,
+    )
 
     args, rest = parser.parse_known_args(argv)
 
@@ -73,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "release":
         from escarp.cli_release import main as release_main
         return release_main(rest)
+    if args.command == "docs":
+        from escarp.cli_docs import main as docs_main
+        return docs_main(rest)
 
     parser.print_help()
     return 0

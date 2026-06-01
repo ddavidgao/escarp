@@ -1,0 +1,196 @@
+Escarp + Codex CUA quickstart
+=============================
+
+Escarp gives coding agents isolated persistent Chrome for Testing slots.
+For Codex visible browser work, Escarp leases the browser slot and Codex
+Computer Use (CUA) drives that leased slot as a real app window.
+
+Mental model:
+
+- Escarp owns browser slot identity and leases.
+- Codex CUA owns visible interaction: click, type, scroll, screenshots,
+  accessibility tree, native dialogs, and OS-level UI.
+- CDP, curl, Playwright, and DevTools are useful diagnostics, but they are not
+  the primary control surface for native Codex browser tasks.
+
+
+Install
+-------
+
+Install Escarp:
+
+    pip install escarp
+
+Install Chrome for Testing if Escarp cannot find it:
+
+    npx @puppeteer/browsers install chrome@stable
+
+Check the CLI:
+
+    escarp --version
+    escarp --help
+
+
+One-time setup for Codex
+------------------------
+
+Register Escarp's MCP server with Codex and run Escarp's setup checks:
+
+    escarp setup codex
+
+If setup says the broker or pool is not running yet, start them:
+
+    escarp launch-pool --cua-apps
+    escarp daemon
+
+On macOS, `--cua-apps` is important. It creates one lightweight app identity
+per slot, such as:
+
+    Escarp Chrome Slot 0
+    Escarp Chrome Slot 1
+
+This lets Codex CUA target the correct leased browser instead of whichever
+Chrome window is frontmost.
+
+
+Normal native-CUA workflow
+--------------------------
+
+In a terminal, lease a slot and keep the lease alive:
+
+    escarp acquire --holder codex-cua --focus --prompt --hold
+
+What this does:
+
+- Acquires a free Escarp slot.
+- Focuses the leased Chrome for Testing slot.
+- Prints a paste-ready Codex CUA prompt.
+- Heartbeats the lease until you press Ctrl-C.
+- Releases and resets the slot when you press Ctrl-C.
+
+Copy the printed prompt into Codex, then replace `[YOUR TASK HERE]` with the
+browser task.
+
+Example prompt:
+
+    Use native Computer Use on the app with bundle identifier
+    "dev.escarp.chrome.slot0" (Escarp Chrome Slot 0). Do not switch apps or
+    open a different browser. This app is the leased escarp slot 0. Go to
+    https://en.wikipedia.org and find something interesting.
+
+
+Codex instruction block
+-----------------------
+
+Paste this into Codex custom instructions, a repo `AGENTS.md`, or your agent
+runbook when you want browser requests to use Escarp automatically:
+
+    Browser default:
+
+    When the user asks to "open a browser", "use a browser", "browse", or
+    "go to" a site without naming a specific browser, use an isolated Escarp
+    Chrome slot controlled through Codex Computer Use (CUA).
+
+    Required workflow:
+
+    1. Check Escarp availability with `mcp__escarp.escarp_status`.
+    2. Lease a slot with `mcp__escarp.escarp_acquire`.
+    3. Immediately bind to the leased slot with
+       `mcp__computer_use.get_app_state`, using the returned app name or bundle
+       identity such as `Escarp Chrome Slot 0`.
+    4. Navigate and interact through CUA actions: click, type, scroll,
+       keypress, screenshots, and accessibility state.
+    5. Use CDP, curl, Playwright, or DevTools only as secondary diagnostics,
+       never as the primary browser control path for this task.
+    6. Do not use the in-app browser, personal Chrome, Safari, Zen, or another
+       browser unless the user explicitly asks for that browser or the task
+       requires that authenticated personal session.
+    7. Say "Escarp + CUA" only if CUA actually drove or verified the leased
+       browser.
+
+    Critical rule:
+
+    Escarp slot alone is not enough. CUA must be the browser control surface.
+
+
+MCP tool workflow inside Codex
+------------------------------
+
+When Escarp's MCP server is registered, Codex should use this sequence:
+
+1. Inspect pool state:
+
+       mcp__escarp.escarp_status
+
+2. Acquire a slot:
+
+       mcp__escarp.escarp_acquire
+
+   The acquire response includes fields like:
+
+       cua_app_bundle_id
+       cua_app_name
+       cua_app_path
+       cdp_ws_url
+       cdp_port
+       slot
+
+3. Bind CUA to the leased app:
+
+       mcp__computer_use.get_app_state
+
+   Use the returned `cua_app_name`, for example:
+
+       Escarp Chrome Slot 0
+
+4. Drive the browser with CUA:
+
+       mcp__computer_use.click
+       mcp__computer_use.type_text
+       mcp__computer_use.press_key
+       mcp__computer_use.scroll
+       mcp__computer_use.get_app_state
+
+5. Release the slot when finished if the MCP session does not release it
+   automatically.
+
+
+When to use CDP instead
+-----------------------
+
+Use the leased `cdp_ws_url` for deterministic developer automation, parallel
+test runs, or protocol-level diagnostics.
+
+For visible user-facing browser work, demos, forms, file pickers, native
+dialogs, and tasks where screenshots are the source of truth, use Codex CUA.
+
+
+Troubleshooting
+---------------
+
+Escarp command not found:
+
+    python -m pip install --upgrade escarp
+
+Chrome for Testing not found:
+
+    npx @puppeteer/browsers install chrome@stable
+
+No broker available:
+
+    escarp launch-pool --cua-apps
+    escarp daemon
+
+Pool is full:
+
+    escarp release --mine
+
+Or wait for the broker reaper to reclaim expired leases.
+
+Need to see slot identity:
+
+    escarp window 0
+
+Need a paste-ready Codex prompt:
+
+    escarp acquire --holder codex-cua --focus --prompt --hold
