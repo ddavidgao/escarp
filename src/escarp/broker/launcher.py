@@ -19,15 +19,54 @@ from pathlib import Path
 
 from escarp.broker.browser import (
     BrowserLaunchError,
+    ManagedBrowser,
     find_cft_binary,
     launch_cft,
 )
-from escarp.broker.cua_apps import CuaAppError, ensure_cua_slot_app
+from escarp.broker.cua_apps import CuaAppError, CuaSlotApp, ensure_cua_slot_app
 from escarp.broker.discovery import probe
 from escarp.broker.slots import profile_dir_for_slot
 
 DEFAULT_POOL_SIZE = 4
 DEFAULT_CDP_BASE = 9222
+
+
+def _spawn_slot_chrome(
+    *,
+    slot: int,
+    cft_binary: Path,
+    cdp_port: int,
+    tier: str,
+    cua_apps: bool,
+) -> tuple[ManagedBrowser, Path, CuaSlotApp | None]:
+    """Launch one detached chrome for `slot`. In CUA mode, launch it from the
+    per-slot app bundle so native CUA can target it. Returns (browser, profile,
+    slot_app|None). Raises CuaAppError / BrowserLaunchError on failure."""
+    profile = profile_dir_for_slot(slot, tier=tier)
+    binary = cft_binary
+    slot_app: CuaSlotApp | None = None
+    if cua_apps:
+        slot_app = ensure_cua_slot_app(slot=slot, cft_binary=cft_binary)
+        binary = slot_app.binary_path
+    browser = launch_cft(slot=slot, binary=binary, profile_dir=profile, cdp_port=cdp_port)
+    return browser, profile, slot_app
+
+
+async def ensure_slot_chrome(
+    *,
+    slot: int,
+    cft_binary: Path,
+    cdp_base_port: int = DEFAULT_CDP_BASE,
+    tier: str = "autonomous",
+    cua_apps: bool = False,
+) -> bool:
+    """Ensure a chrome is listening on the slot's cdp port, launching one if not.
+    Returns True if it launched a new chrome, False if one was already up."""
+    port = cdp_base_port + slot
+    if await probe(port, timeout=0.5) is not None:
+        return False
+    _spawn_slot_chrome(slot=slot, cft_binary=cft_binary, cdp_port=port, tier=tier, cua_apps=cua_apps)
+    return True
 
 
 async def launch_pool(
@@ -59,33 +98,29 @@ async def launch_pool(
             skipped += 1
             continue
 
-        profile = profile_dir_for_slot(slot, tier=tier)
-        binary = cft_binary
-        cua_detail = ""
-        if cua_apps:
-            try:
-                slot_app = ensure_cua_slot_app(slot=slot, cft_binary=cft_binary)
-            except CuaAppError as exc:
-                print(f"[slot {slot}] CUA app setup failed: {exc}", file=sys.stderr)
-                failed += 1
-                continue
-            binary = slot_app.binary_path
-            cua_detail = (
-                f"\n            cua_app={slot_app.app_path}"
-                f"\n            cua_bundle_id={slot_app.bundle_id}"
-            )
         try:
-            browser = launch_cft(
+            browser, profile, slot_app = _spawn_slot_chrome(
                 slot=slot,
-                binary=binary,
-                profile_dir=profile,
+                cft_binary=cft_binary,
                 cdp_port=port,
+                tier=tier,
+                cua_apps=cua_apps,
             )
+        except CuaAppError as exc:
+            print(f"[slot {slot}] CUA app setup failed: {exc}", file=sys.stderr)
+            failed += 1
+            continue
         except BrowserLaunchError as exc:
             print(f"[slot {slot}] launch failed: {exc}", file=sys.stderr)
             failed += 1
             continue
 
+        cua_detail = (
+            f"\n            cua_app={slot_app.app_path}"
+            f"\n            cua_bundle_id={slot_app.bundle_id}"
+            if slot_app
+            else ""
+        )
         print(
             f"[slot {slot}] launched  pid={browser.pid}  cdp_port={port}\n"
             f"            ws={browser.cdp_ws_url}\n"

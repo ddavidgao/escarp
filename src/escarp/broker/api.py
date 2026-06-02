@@ -29,11 +29,17 @@ from escarp.broker.lease import (
     UnknownLease,
     UnknownSlot,
 )
+from escarp.broker.pool import (
+    NoBrowserOnPort,
+    PoolController,
+    PoolError,
+    SlotAlreadyInPool,
+)
 
 DEFAULT_PORT = 7878
 
 
-def build_app(broker: Broker) -> web.Application:
+def build_app(broker: Broker, *, pool: PoolController | None = None) -> web.Application:
     routes = web.RouteTableDef()
 
     @routes.get("/status")
@@ -110,6 +116,49 @@ def build_app(broker: Broker) -> web.Application:
     @routes.get("/reaped")
     async def reaped(_request: web.Request) -> web.Response:
         return web.json_response({"reaped": broker.reaped_log()})
+
+    @routes.post("/pool/add")
+    async def pool_add(request: web.Request) -> web.Response:
+        if pool is None:
+            return web.json_response({"error": "hot_pool_unavailable"}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "bad_json"}, status=400)
+        slot = body.get("slot")
+        if not isinstance(slot, int):
+            return web.json_response({"error": "missing_slot"}, status=400)
+        try:
+            rec = await pool.add_slot(slot)
+        except SlotAlreadyInPool as exc:
+            return web.json_response({"error": "slot_already_in_pool", "message": str(exc)}, status=409)
+        except NoBrowserOnPort as exc:
+            return web.json_response({"error": "no_browser_on_port", "message": str(exc)}, status=409)
+        except PoolError as exc:
+            return web.json_response({"error": "pool_error", "message": str(exc)}, status=409)
+        return web.json_response(
+            rec.to_public(lease_ttl_s=broker.lease_ttl_s, reaper_interval_s=broker.reaper_interval_s)
+        )
+
+    @routes.post("/pool/remove")
+    async def pool_remove(request: web.Request) -> web.Response:
+        if pool is None:
+            return web.json_response({"error": "hot_pool_unavailable"}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "bad_json"}, status=400)
+        slot = body.get("slot")
+        if not isinstance(slot, int):
+            return web.json_response({"error": "missing_slot"}, status=400)
+        force = bool(body.get("force", False))
+        try:
+            await pool.remove_slot(slot, force=force)
+        except UnknownSlot as exc:
+            return web.json_response({"error": "unknown_slot", "message": str(exc)}, status=404)
+        except SlotLeased as exc:
+            return web.json_response({"error": "slot_leased", "message": str(exc)}, status=409)
+        return web.json_response({"removed": True, "slot": slot})
 
     app = web.Application()
     app.add_routes(routes)

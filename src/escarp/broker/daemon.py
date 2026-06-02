@@ -33,11 +33,10 @@ from aiohttp import web
 
 from escarp.broker.api import DEFAULT_PORT, bind_with_shift, build_app
 from escarp.broker.browser import reset_browser_state
-from escarp.broker.calibration import calibrate_slot
-from escarp.broker.cua_apps import existing_cua_slot_app
 from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
-from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
+from escarp.broker.pool import PoolController, register_browser
+from escarp.broker.slots import SlotBusy, ports_for_slot
 from escarp.pool_config import DEFAULT_CDP_BASE, load_pool_config
 
 DEFAULT_CDP_BASE_PORT = DEFAULT_CDP_BASE
@@ -54,22 +53,23 @@ def _env_int(name: str, default: int) -> int:
         raise SystemExit(f"{name} must be an integer, got {raw!r}") from exc
 
 
-def _format_table(leases: list[SlotLease], browsers: list[DiscoveredBrowser]) -> str:
+def _format_table(browsers: list[DiscoveredBrowser]) -> str:
     rows = [f"{'slot':<6}{'cdp':<8}{'frontend':<10}{'backend':<10}cdp_ws_url"]
-    for lease, browser in zip(leases, browsers, strict=True):
+    for browser in browsers:
+        ports = ports_for_slot(browser.slot)
         rows.append(
-            f"{lease.slot:<6}"
-            f"{lease.ports.cdp:<8}"
-            f"{lease.ports.frontend:<10}"
-            f"{lease.ports.backend:<10}"
+            f"{browser.slot:<6}"
+            f"{ports.cdp:<8}"
+            f"{ports.frontend:<10}"
+            f"{ports.backend:<10}"
             f"{browser.cdp_ws_url}"
         )
     return "\n".join(rows)
 
 
-async def _serve_http(broker: Broker, api_port: int) -> tuple[web.AppRunner, int]:
+async def _serve_http(broker: Broker, api_port: int, pool: PoolController) -> tuple[web.AppRunner, int]:
 
-    app = build_app(broker)
+    app = build_app(broker, pool=pool)
     runner = web.AppRunner(app)
     await runner.setup()
     sock, actual_port = bind_with_shift("127.0.0.1", api_port)
@@ -86,7 +86,6 @@ async def run_daemon(
     lease_ttl_s: float,
     discovery_wait_s: float,
 ) -> int:
-    leases: list[SlotLease] = []
     browsers: list[DiscoveredBrowser] = []
 
     async def reset_for_port(cdp_port: int) -> None:
@@ -97,6 +96,7 @@ async def run_daemon(
             print(f"[reset] cdp_port={cdp_port} failed: {exc}", file=sys.stderr, flush=True)
 
     broker = Broker(lease_ttl_s=lease_ttl_s, reset_fn=reset_for_port)
+    controller = PoolController(broker, cdp_base=cdp_base_port)
     runner: web.AppRunner | None = None
     reaper_task: asyncio.Task[None] | None = None
     stop_event = asyncio.Event()
@@ -125,9 +125,11 @@ async def run_daemon(
             return 1
 
         # 2. Claim slot locks for whatever's discovered; register into the broker.
+        #    Same registration path as a hot `pool add`, so boot and live-add
+        #    behave identically.
         for browser in discovered:
             try:
-                lease = claim_slot(browser.slot)
+                reg = await register_browser(broker, browser, tier=controller.tier)
             except SlotBusy as exc:
                 print(
                     f"[slot {browser.slot}] another broker holds the lock for this slot. {exc}",
@@ -135,55 +137,14 @@ async def run_daemon(
                     flush=True,
                 )
                 continue
-            leases.append(lease)
+            controller.adopt(browser.slot, reg.lease)
             browsers.append(browser)
-
-            try:
-                stale_closed = await reset_browser_state(browser.cdp_port)
-            except Exception as exc:
-                stale_closed = -1
-                print(f"[slot {browser.slot}] startup reset failed: {exc}", file=sys.stderr)
-
-            cua_app = existing_cua_slot_app(browser.slot)
-            if cua_app is None:
-                calib = await calibrate_slot(slot=browser.slot, browser_ws_url=browser.cdp_ws_url)
-                os_window_id = calib.os_window_id
-                owner_pid = calib.owner_pid
-                bounds = calib.geom.as_bounds() if calib.succeeded() else None
-                cdp_window_id = calib.cdp_window_id
-                cdp_target_id = calib.cdp_target_id
-                calibration_note = calib.failed_reason
-            else:
-                # Native CUA targets the per-slot app bundle, not a
-                # kCGWindowNumber. The old calibration path intentionally
-                # resizes windows via CDP to bind CDP -> CGWindow; doing that
-                # here is both unnecessary and visibly disruptive.
-                os_window_id = None
-                owner_pid = None
-                bounds = None
-                cdp_window_id = None
-                cdp_target_id = None
-                calibration_note = "CUA app identity mode; OS-window calibration skipped"
-            broker.register(
-                slot=browser.slot,
-                cdp_port=browser.cdp_port,
-                cdp_ws_url=browser.cdp_ws_url,
-                pid=-1,
-                os_window_id=os_window_id,
-                owner_pid=owner_pid,
-                bounds=bounds,
-                cdp_window_id=cdp_window_id,
-                cdp_target_id=cdp_target_id,
-                calibration_note=calibration_note,
-                cua_app_bundle_id=cua_app.bundle_id if cua_app else None,
-                cua_app_path=str(cua_app.app_path) if cua_app else None,
-                cua_app_name=cua_app.display_name if cua_app else None,
-            )
+            rec = reg.record
             print(
-                f"[slot {browser.slot}] discovered  reset_closed={stale_closed}"
-                f"  os_window_id={os_window_id}  owner_pid={owner_pid}"
-                + (f"  cua_app={cua_app.bundle_id}" if cua_app else "")
-                + (f"  calib_warn={calibration_note}" if calibration_note else ""),
+                f"[slot {browser.slot}] discovered  reset_closed={reg.stale_closed}"
+                f"  os_window_id={rec.os_window_id}  owner_pid={rec.owner_pid}"
+                + (f"  cua_app={rec.cua_app_bundle_id}" if rec.cua_app_bundle_id else "")
+                + (f"  calib_warn={rec.calibration_note}" if rec.calibration_note else ""),
                 flush=True,
             )
 
@@ -192,12 +153,12 @@ async def run_daemon(
             return 1
 
         # 3. HTTP + reaper.
-        runner, actual_port = await _serve_http(broker, api_port)
+        runner, actual_port = await _serve_http(broker, api_port, controller)
         _write_pidfile(api_port=actual_port)
         reaper_task = asyncio.create_task(reaper_loop(broker, stop=stop_event))
 
         print()
-        print(_format_table(leases, browsers))
+        print(_format_table(browsers))
         print()
         print(f"broker http api:  http://127.0.0.1:{actual_port}")
         print(f"lease ttl:        {lease_ttl_s}s   reaper interval: 2s")
@@ -225,8 +186,7 @@ async def run_daemon(
                 reaper_task.cancel()
         if runner is not None:
             await runner.cleanup()
-        for lease in leases:
-            lease.release()
+        controller.release_all()
         _clear_pidfile()
         # NOTE: intentionally do NOT touch chromes. They are infrastructure.
 

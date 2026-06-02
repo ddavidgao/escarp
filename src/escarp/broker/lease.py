@@ -176,6 +176,27 @@ class Broker:
         self._records[slot] = rec
         return rec
 
+    async def unregister(self, *, slot: int, force: bool = False) -> LeaseRecord:
+        """Drop a slot from the pool. Refuses a leased slot unless force=True, so
+        a hot-remove can't silently yank a slot out from under a working agent.
+
+        Returns the removed record. The caller is responsible for the slot lock
+        and the chrome lifecycle -- the broker only owns the in-memory record.
+        """
+        async with self._lock:
+            if slot not in self._records:
+                raise UnknownSlot(f"slot {slot} not in pool (size={len(self._records)})")
+            rec = self._records[slot]
+            if rec.state == "leased" and not force:
+                raise SlotLeased(
+                    f"slot {slot} is leased to {rec.holder!r}; pass force=True to remove anyway"
+                )
+            del self._records[slot]
+            return rec
+
+    def has_slot(self, slot: int) -> bool:
+        return slot in self._records
+
     def snapshot(self) -> list[dict[str, object]]:
         now = time.time()
         return [

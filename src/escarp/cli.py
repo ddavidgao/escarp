@@ -59,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         help="resize the pool to N slots (launch/kill chromes, persist N, restart daemon).",
         add_help=False,
     )
+    sub.add_parser(
+        "pool",
+        help="add/remove a single slot on the running daemon, no restart (pool add|remove).",
+        add_help=False,
+    )
 
     args, rest = parser.parse_known_args(argv)
 
@@ -89,6 +94,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scale":
         from escarp.cli_scale import main as scale_main
         return scale_main(rest)
+    if args.command == "pool":
+        from escarp.cli_pool import main as pool_main
+        return pool_main(rest)
 
     parser.print_help()
     return 0

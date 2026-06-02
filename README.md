@@ -118,12 +118,31 @@ clean-restarts the daemon. Chromes are only ever started/stopped here, never by
 the daemon. An `ESCARP_POOL_SIZE` env var still overrides the persisted size for
 one-off runs.
 
+#### Hot add/remove (no restart)
+
+`scale` rebuilds the whole pool and bounces the daemon. When you just want to
+nudge the pool by one slot while it keeps serving, use `pool add` / `pool
+remove`, which change membership on the **running** daemon with no restart:
+
+```bash
+escarp pool add          # add the lowest free slot, live
+escarp pool add 7        # add a specific slot, live
+escarp pool remove 7     # remove it again, live
+```
+
+These talk to the broker's `/pool/add` and `/pool/remove` endpoints. The daemon
+still never owns chrome lifecycles: `pool add` launches the chrome first and then
+registers it; `pool remove` unbrokers first and then kills the chrome. Existing
+leases on untouched slots are never interrupted.
+
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `escarp launch-pool [--cua-apps]` | Spawn N detached Chrome for Testing slots. One-shot; chromes outlive this command. Idempotent (skips slots already listening). `--cua-apps` creates per-slot macOS app bundle identities so native Codex CUA can target slots as separate apps. Records the launched size in `~/.escarp/pool.json`. |
 | **`escarp scale N`** | **Resize the pool to N slots.** Probes the cdp ports to see what's live, launches the missing slots below N and terminates the live ones at or above N, persists N to `pool.json`, then clean-restarts the daemon so it brokers exactly `[0, N)`. `--dry-run` prints the plan only. `--force` removes a slot even if leased. `--keep-data` keeps removed slots' profiles/bundles. `--no-restart` reconciles and persists without bouncing the daemon. |
+| **`escarp pool add [N]`** | **Add one slot to the running pool with NO daemon restart.** Launches the chrome for slot N (default: lowest free index), then has the live daemon discover + broker it via `POST /pool/add`. `--no-launch` requires a chrome already listening. `--cua-apps/--no-cua-apps` sets the identity mode. Persists the new size. |
+| **`escarp pool remove N`** | **Remove one slot from the running pool with NO daemon restart.** Has the live daemon unbroker + drop the slot lock via `POST /pool/remove`, then terminates the chrome and cleans its data. `--force` removes a leased slot. `--keep-chrome` leaves the chrome running. `--keep-data` keeps the profile/bundle. |
 | `escarp daemon` | Discover live chromes, broker leases on `127.0.0.1:7878`, run the reaper. Pool size comes from `ESCARP_POOL_SIZE` env, else `~/.escarp/pool.json`, else 4. In CUA app mode it records the per-slot bundle identity and avoids resizing windows; otherwise it calibrates each slot to an OS-window identity. Does NOT own chrome lifecycles. |
 | **`escarp window <slot>`** | **Print a slot's identity.** In CUA app mode this is the per-slot app bundle ID. In OS-window mode it also returns `os_window_id`, owner_pid, bounds, and live verification fields. Supports `--json` and `--verify-key` for OS-window mode. |
 | `escarp acquire --holder X [--focus] [--prompt] [--hold]` | Lease a slot. Persists token to `~/.escarp/leases.json`. `--hold` heartbeats in the foreground until Ctrl-C, then releases the lease. |
