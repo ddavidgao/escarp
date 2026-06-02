@@ -4,7 +4,7 @@ Phase 2 minimal: detached subprocess + HTTP /json/version discovery. No lease
 state, no reset logic — that's Phase 3. This module owns "how do we make a
 CfT window exist on the user's monitor and surface its CDP websocket URL."
 
-Discovery contract (per Phase 0 smoke test, see V2_PLAN.md §9):
+Discovery contract (per Phase 0 smoke test):
 - Primary: GET http://127.0.0.1:<cdp_port>/json/version -> webSocketDebuggerUrl.
   Empirically confirmed working in CfT 149.0.7827.54 on macOS arm64.
 - The DevToolsActivePort file the original plan called for does NOT appear in
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import httpx
 
-# Locked launch flags, per V2_PLAN.md §7 Phase 2.
+# Locked launch flags.
 _BASE_FLAGS: tuple[str, ...] = (
     "--no-first-run",
     "--no-default-browser-check",
@@ -152,7 +152,7 @@ def shutdown(browser: ManagedBrowser, *, grace: float = 3.0) -> None:
 async def reset_browser_state(cdp_port: int, *, target_url: str = "about:blank") -> int:
     """Reset a leased browser to a clean slate.
 
-    Per V2_PLAN.md §7 Phase 2: "on lease release, reset -- never close." Closes
+    The contract is "on lease release, reset -- never close." Closes
     every page-type tab except a freshly-created one navigated to target_url.
     Internal target types (browser_ui, service_worker, etc.) are left alone --
     those are chrome's own plumbing, not user-visible tabs.

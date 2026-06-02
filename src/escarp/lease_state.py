@@ -1,7 +1,7 @@
 """Local lease-state file at ~/.escarp/leases.json.
 
-The broker is the single source of truth for lease state (per V2_PLAN.md
-decision #3), but it identifies leases by token, which the user can't be
+The broker is the single source of truth for lease state, but it
+identifies leases by token, which the user can't be
 expected to remember between `acquire` and `release`. This module keeps a
 local cache of "leases I (this machine) recently acquired" so commands like
 `escarp release --mine` can resolve to the right tokens.

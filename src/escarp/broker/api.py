@@ -1,6 +1,6 @@
 """HTTP layer for the broker daemon.
 
-Bind-and-shift on EADDRINUSE per V2_PLAN.md locked decision #6. Three verbs
+Bind-and-shift on EADDRINUSE. Three verbs
 plus one read endpoint:
 
     GET  /status                 -> pool snapshot (no lease tokens leaked)
@@ -168,8 +168,8 @@ def build_app(broker: Broker, *, pool: PoolController | None = None) -> web.Appl
 def bind_with_shift(host: str, preferred_port: int, *, max_attempts: int = 10) -> tuple[socket.socket, int]:
     """Bind a TCP socket atomically; on EADDRINUSE shift by +10 and retry.
 
-    Per V2_PLAN.md locked decision #6: bind() is the atomic test, no
-    pre-check race. Returns (bound socket, actual port).
+    bind() is the atomic test, no pre-check race. Returns (bound socket,
+    actual port).
     """
     last_error: OSError | None = None
     for i in range(max_attempts):

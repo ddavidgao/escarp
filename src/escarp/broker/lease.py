@@ -1,6 +1,6 @@
 """Lease broker: in-memory state machine for browser lease records.
 
-Single source of truth, per V2_PLAN.md §4 locked decision #3. The model never
+Single source of truth. The model never
 sees this state machine directly -- the MCP shim does, on the model's behalf.
 
 Concurrency: all mutating methods hold an asyncio.Lock so concurrent acquire/

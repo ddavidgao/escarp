@@ -16,8 +16,8 @@ the three tools. The shim:
     model session can't time out mid-task. Heartbeat fires every (TTL / 3)
     seconds, well clear of the broker's reaper.
   - On shim shutdown (model disconnect / process exit), releases the lease so
-    the slot returns to the pool. (Per V2_PLAN.md decision #5: disconnect
-    frees the LEASE, not the browser.)
+    the slot returns to the pool. (Disconnect frees the LEASE, not the
+    browser.)
 """
 
 from __future__ import annotations

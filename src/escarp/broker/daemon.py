@@ -1,6 +1,6 @@
 """Broker daemon: discovers already-running browsers, brokers leases, runs reaper.
 
-**Does NOT own chrome lifecycles.** Per V2_PLAN.md's persistence contract,
+**Does NOT own chrome lifecycles.** Per the persistence contract,
 chromes are infrastructure that exists independently. To start the chromes,
 run `escarp launch-pool` (or launchd, systemd, docker, manual shell, whatever).
 This daemon's only relationship to a chrome is "discover via /json/version,

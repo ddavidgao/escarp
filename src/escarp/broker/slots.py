@@ -1,6 +1,6 @@
 """Slot allocator: per-worktree atomic claim via flock, plus port derivation.
 
-Per V2_PLAN.md §5, every resource a worktree needs is derived from a single
+Every resource a worktree needs is derived from a single
 integer `slot` index in `[0, pool_size)`. A worktree claims a slot by
 acquiring an exclusive flock on a per-slot lockfile and holding the fd open
 for its entire process lifetime — the kernel releases the lock automatically
