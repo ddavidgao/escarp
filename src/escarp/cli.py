@@ -54,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
         help="list or print bundled docs installed with the package.",
         add_help=False,
     )
+    sub.add_parser(
+        "scale",
+        help="resize the pool to N slots (launch/kill chromes, persist N, restart daemon).",
+        add_help=False,
+    )
 
     args, rest = parser.parse_known_args(argv)
 
@@ -81,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "docs":
         from escarp.cli_docs import main as docs_main
         return docs_main(rest)
+    if args.command == "scale":
+        from escarp.cli_scale import main as scale_main
+        return scale_main(rest)
 
     parser.print_help()
     return 0

@@ -23,9 +23,11 @@ End-to-end shape:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import sys
+from pathlib import Path
 
 from aiohttp import web
 
@@ -36,9 +38,10 @@ from escarp.broker.cua_apps import existing_cua_slot_app
 from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.slots import SlotBusy, SlotLease, claim_slot
+from escarp.pool_config import DEFAULT_CDP_BASE, load_pool_config
 
-DEFAULT_POOL_SIZE = 4
-DEFAULT_CDP_BASE_PORT = 9222
+DEFAULT_CDP_BASE_PORT = DEFAULT_CDP_BASE
+DAEMON_PIDFILE = Path.home() / ".escarp" / "daemon.pid"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -190,6 +193,7 @@ async def run_daemon(
 
         # 3. HTTP + reaper.
         runner, actual_port = await _serve_http(broker, api_port)
+        _write_pidfile(api_port=actual_port)
         reaper_task = asyncio.create_task(reaper_loop(broker, stop=stop_event))
 
         print()
@@ -223,14 +227,34 @@ async def run_daemon(
             await runner.cleanup()
         for lease in leases:
             lease.release()
+        _clear_pidfile()
         # NOTE: intentionally do NOT touch chromes. They are infrastructure.
 
 
+def _write_pidfile(*, api_port: int) -> None:
+    """Record this daemon's pid (and the broker port it bound) so `escarp scale`
+    can find it for a clean restart. Best-effort: a failure here never blocks
+    the daemon from serving."""
+    try:
+        DAEMON_PIDFILE.parent.mkdir(parents=True, exist_ok=True)
+        DAEMON_PIDFILE.write_text(f"{os.getpid()} {api_port}\n")
+    except OSError as exc:
+        print(f"[daemon] could not write pidfile {DAEMON_PIDFILE}: {exc}", file=sys.stderr)
+
+
+def _clear_pidfile() -> None:
+    with contextlib.suppress(OSError):
+        DAEMON_PIDFILE.unlink(missing_ok=True)
+
+
 def main(argv: list[str] | None = None) -> int:
-    pool_size = _env_int("ESCARP_POOL_SIZE", DEFAULT_POOL_SIZE)
+    # Persisted pool config is the source of truth for the size; an explicit
+    # ESCARP_POOL_SIZE env still overrides it for one-off runs.
+    cfg = load_pool_config()
+    pool_size = _env_int("ESCARP_POOL_SIZE", cfg.pool_size)
     if pool_size < 1:
-        raise SystemExit(f"ESCARP_POOL_SIZE must be >= 1, got {pool_size}")
-    cdp_base_port = _env_int("ESCARP_CDP_BASE", DEFAULT_CDP_BASE_PORT)
+        raise SystemExit(f"pool size must be >= 1, got {pool_size}")
+    cdp_base_port = _env_int("ESCARP_CDP_BASE", cfg.cdp_base)
     api_port = _env_int("ESCARP_API_PORT", DEFAULT_PORT)
     lease_ttl_s = float(os.environ.get("ESCARP_LEASE_TTL_S", "60"))
     discovery_wait_s = float(os.environ.get("ESCARP_DISCOVERY_WAIT_S", "0"))

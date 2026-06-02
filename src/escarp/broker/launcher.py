@@ -140,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    return asyncio.run(
+    rc = asyncio.run(
         launch_pool(
             pool_size=args.pool_size,
             cdp_base_port=args.cdp_base_port,
@@ -148,3 +148,18 @@ def main(argv: list[str] | None = None) -> int:
             cua_apps=args.cua_apps,
         )
     )
+    if rc == 0:
+        # Record the launched shape so a later `escarp daemon` restart re-reads
+        # this size instead of the default, and so `escarp scale` knows the
+        # launch parameters (base port, cua mode) to reconcile against.
+        from escarp.pool_config import PoolConfig, save_pool_config
+
+        save_pool_config(
+            PoolConfig(
+                pool_size=args.pool_size,
+                cdp_base=args.cdp_base_port,
+                cua_apps=args.cua_apps,
+                cft_binary=str(cft),
+            )
+        )
+    return rc

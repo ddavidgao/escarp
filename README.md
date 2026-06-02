@@ -96,12 +96,35 @@ escarp acquire --holder me --prompt --hold
 # press Ctrl-C in the acquire terminal when done; it releases and resets the slot
 ```
 
+### Resizing the pool
+
+The pool size is the single canonical number describing how many slots this
+machine runs. It is persisted in `~/.escarp/pool.json` (default 4), so the
+chromes and the daemon's idea of how many slots exist can never silently drift:
+a plain `escarp daemon` restart re-reads the persisted size instead of falling
+back to the default and orphaning the slots above it.
+
+To change it, use one command:
+
+```bash
+escarp scale 6            # grow to 6 slots
+escarp scale 4            # shrink to 4 (terminates slots 4,5 and their data)
+escarp scale 8 --dry-run  # show the plan without touching anything
+```
+
+`scale` measures reality (probes the cdp ports), reconciles to the target
+(launches the missing slots, terminates the excess), persists the new size, and
+clean-restarts the daemon. Chromes are only ever started/stopped here, never by
+the daemon. An `ESCARP_POOL_SIZE` env var still overrides the persisted size for
+one-off runs.
+
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `escarp launch-pool [--cua-apps]` | Spawn N detached Chrome for Testing slots. One-shot; chromes outlive this command. Idempotent (skips slots already listening). `--cua-apps` creates per-slot macOS app bundle identities so native Codex CUA can target slots as separate apps. |
-| `escarp daemon` | Discover live chromes, broker leases on `127.0.0.1:7878`, run the reaper. In CUA app mode it records the per-slot bundle identity and avoids resizing windows; otherwise it calibrates each slot to an OS-window identity. Does NOT own chrome lifecycles. |
+| `escarp launch-pool [--cua-apps]` | Spawn N detached Chrome for Testing slots. One-shot; chromes outlive this command. Idempotent (skips slots already listening). `--cua-apps` creates per-slot macOS app bundle identities so native Codex CUA can target slots as separate apps. Records the launched size in `~/.escarp/pool.json`. |
+| **`escarp scale N`** | **Resize the pool to N slots.** Probes the cdp ports to see what's live, launches the missing slots below N and terminates the live ones at or above N, persists N to `pool.json`, then clean-restarts the daemon so it brokers exactly `[0, N)`. `--dry-run` prints the plan only. `--force` removes a slot even if leased. `--keep-data` keeps removed slots' profiles/bundles. `--no-restart` reconciles and persists without bouncing the daemon. |
+| `escarp daemon` | Discover live chromes, broker leases on `127.0.0.1:7878`, run the reaper. Pool size comes from `ESCARP_POOL_SIZE` env, else `~/.escarp/pool.json`, else 4. In CUA app mode it records the per-slot bundle identity and avoids resizing windows; otherwise it calibrates each slot to an OS-window identity. Does NOT own chrome lifecycles. |
 | **`escarp window <slot>`** | **Print a slot's identity.** In CUA app mode this is the per-slot app bundle ID. In OS-window mode it also returns `os_window_id`, owner_pid, bounds, and live verification fields. Supports `--json` and `--verify-key` for OS-window mode. |
 | `escarp acquire --holder X [--focus] [--prompt] [--hold]` | Lease a slot. Persists token to `~/.escarp/leases.json`. `--hold` heartbeats in the foreground until Ctrl-C, then releases the lease. |
 | `escarp release {--mine \| --slot N \| --holder NAME \| --token T}` | Token-free release for humans. |
