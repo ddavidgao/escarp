@@ -16,6 +16,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -35,13 +36,54 @@ def broker_status(api_port: int) -> dict[str, Any] | None:
 
 
 def find_broker_port() -> int | None:
-    """The broker binds DEFAULT_PORT, shifting by +10 on collision. Walk the same
-    ladder to find a live one."""
+    """Find the running broker port.
+
+    Honor an explicit ESCARP_BROKER_URL or ESCARP_API_PORT first. The broker
+    binds the preferred API port, shifting by +10 on collision, so walk that
+    same ladder from the configured base.
+    """
+    raw_url = os.environ.get("ESCARP_BROKER_URL")
+    if raw_url:
+        parsed = urlparse(raw_url)
+        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port is not None:
+            for i in range(10):
+                port = parsed.port + i * 10
+                if broker_status(port) is not None:
+                    return port
+            return None
+
+    raw_port = os.environ.get("ESCARP_API_PORT")
+    if raw_port is not None:
+        try:
+            base = int(raw_port)
+        except ValueError:
+            return None
+    else:
+        base = DEFAULT_PORT
+
     for i in range(10):
-        port = DEFAULT_PORT + i * 10
+        port = base + i * 10
         if broker_status(port) is not None:
             return port
     return None
+
+
+def broker_url() -> str:
+    """Return the best broker base URL for CLI commands."""
+    raw_url = os.environ.get("ESCARP_BROKER_URL")
+    if raw_url:
+        parsed = urlparse(raw_url)
+        if parsed.hostname not in {"127.0.0.1", "localhost"}:
+            return raw_url.rstrip("/")
+    port = find_broker_port()
+    if port is not None:
+        return f"http://127.0.0.1:{port}"
+    if raw_url:
+        return raw_url.rstrip("/")
+    raw_port = os.environ.get("ESCARP_API_PORT")
+    if raw_port is not None:
+        return f"http://127.0.0.1:{raw_port}"
+    return f"http://127.0.0.1:{DEFAULT_PORT}"
 
 
 def pids_listening_on(port: int) -> list[int]:

@@ -59,7 +59,7 @@ def _format_table(browsers: list[DiscoveredBrowser]) -> str:
         ports = ports_for_slot(browser.slot)
         rows.append(
             f"{browser.slot:<6}"
-            f"{ports.cdp:<8}"
+            f"{browser.cdp_port:<8}"
             f"{ports.frontend:<10}"
             f"{ports.backend:<10}"
             f"{browser.cdp_ws_url}"

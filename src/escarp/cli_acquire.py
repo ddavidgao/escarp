@@ -25,10 +25,8 @@ import time
 import httpx
 
 from escarp import lease_state
-from escarp.broker.api import DEFAULT_PORT
 from escarp.broker.focus import focus_slot, slot_title
-
-BROKER_URL_DEFAULT = f"http://127.0.0.1:{DEFAULT_PORT}"
+from escarp.slot_ops import broker_url
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -84,7 +82,7 @@ def _cua_prompt_for(record: dict) -> str:
 
 
 def _slot_record(slot: int) -> dict | None:
-    resp = httpx.get(f"{BROKER_URL_DEFAULT}/status", timeout=3.0)
+    resp = httpx.get(f"{broker_url()}/status", timeout=3.0)
     resp.raise_for_status()
     data = resp.json()
     return next((s for s in data["slots"] if s["slot"] == slot), None)
@@ -93,7 +91,7 @@ def _slot_record(slot: int) -> dict | None:
 def _release_acquired(record: dict) -> None:
     try:
         httpx.post(
-            f"{BROKER_URL_DEFAULT}/release",
+            f"{broker_url()}/release",
             json={"lease_token": record["lease_token"]},
             timeout=10.0,
         )
@@ -103,7 +101,7 @@ def _release_acquired(record: dict) -> None:
 
 def _lease_ttl_s(default: float = 60.0) -> float:
     try:
-        resp = httpx.get(f"{BROKER_URL_DEFAULT}/status", timeout=3.0)
+        resp = httpx.get(f"{broker_url()}/status", timeout=3.0)
         resp.raise_for_status()
         return float(resp.json().get("lease_ttl_s", default))
     except Exception:
@@ -112,7 +110,7 @@ def _lease_ttl_s(default: float = 60.0) -> float:
 
 def _heartbeat(record: dict) -> dict:
     resp = httpx.post(
-        f"{BROKER_URL_DEFAULT}/heartbeat",
+        f"{broker_url()}/heartbeat",
         json={"lease_token": record["lease_token"]},
         timeout=10.0,
     )
@@ -159,10 +157,11 @@ def main(argv: list[str] | None = None) -> int:
         payload["dev_port"] = args.dev_port
 
     try:
-        resp = httpx.post(f"{BROKER_URL_DEFAULT}/acquire", json=payload, timeout=10.0)
+        base_url = broker_url()
+        resp = httpx.post(f"{base_url}/acquire", json=payload, timeout=10.0)
     except httpx.HTTPError as exc:
         print(
-            f"could not reach broker at {BROKER_URL_DEFAULT}: {exc}\n"
+            f"could not reach broker at {broker_url()}: {exc}\n"
             f"start the daemon first: escarp daemon",
             file=sys.stderr,
         )

@@ -80,6 +80,24 @@ def test_acquire_focus_prompt_passes_os_identity_to_focus(monkeypatch, tmp_path,
     assert "Paste this into Codex CUA" in capsys.readouterr().out
 
 
+def test_acquire_uses_configured_broker_url(monkeypatch, capsys) -> None:
+    post = Mock(return_value=FakeResponse(_lease_record()))
+    requested_urls: list[str] = []
+
+    def fake_post(url, **kwargs):
+        requested_urls.append(url)
+        return post(url, **kwargs)
+
+    monkeypatch.setattr(cli_acquire, "broker_url", lambda: "http://127.0.0.1:17878")
+    monkeypatch.setattr(cli_acquire.httpx, "post", fake_post)
+    monkeypatch.setattr(cli_acquire.lease_state, "add", lambda lease: None)
+
+    rc = cli_acquire.main(["--holder", "e2e", "--slot", "1"])
+
+    assert rc == 0
+    assert requested_urls[0] == "http://127.0.0.1:17878/acquire"
+
+
 def test_acquire_focus_prompt_releases_and_suppresses_prompt_on_focus_failure(
     monkeypatch, capsys
 ) -> None:

@@ -21,9 +21,7 @@ import sys
 import httpx
 
 from escarp import lease_state
-from escarp.broker.api import DEFAULT_PORT
-
-BROKER_URL_DEFAULT = f"http://127.0.0.1:{DEFAULT_PORT}"
+from escarp.slot_ops import broker_url
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -40,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _release_one(token: str) -> tuple[bool, str]:
     try:
         r = httpx.post(
-            f"{BROKER_URL_DEFAULT}/release",
+            f"{broker_url()}/release",
             json={"lease_token": token},
             timeout=10.0,
         )
@@ -71,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"no local record of a lease on slot {args.slot}. "
                 f"Either it expired/was released, or another tool holds it.\n"
                 f"Use --token if you have the token explicitly, or "
-                f"`curl http://127.0.0.1:{DEFAULT_PORT}/status | jq` to see what's live.",
+                f"`curl {broker_url()}/status | jq` to see what's live.",
                 file=sys.stderr,
             )
             return 2

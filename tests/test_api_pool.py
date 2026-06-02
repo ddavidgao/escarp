@@ -6,6 +6,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from escarp.broker.api import build_app
+from escarp.broker.daemon import _format_table
+from escarp.broker.discovery import DiscoveredBrowser
 from escarp.broker.lease import Broker, LeaseRecord, SlotLeased, UnknownSlot
 from escarp.broker.pool import NoBrowserOnPort, SlotAlreadyInPool
 
@@ -118,3 +120,19 @@ async def test_pool_remove_force_passed_through(make_client) -> None:
     resp = await client.post("/pool/remove", json={"slot": 1, "force": True})
     assert resp.status == 200
     assert seen["force"] is True
+
+
+def test_daemon_table_uses_discovered_cdp_port() -> None:
+    table = _format_table(
+        [
+            DiscoveredBrowser(
+                slot=0,
+                cdp_port=19322,
+                cdp_ws_url="ws://127.0.0.1:19322/devtools/browser/x",
+                browser_version="Chrome",
+            )
+        ]
+    )
+
+    assert "19322" in table
+    assert "9222" not in table
