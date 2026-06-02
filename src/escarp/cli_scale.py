@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -65,7 +66,7 @@ async def _scan_live_slots(cdp_base: int, upper: int, *, timeout: float = 0.3) -
 # --------------------------------------------------------------------------- #
 # Broker queries                                                              #
 # --------------------------------------------------------------------------- #
-def _broker_status(api_port: int) -> dict | None:
+def _broker_status(api_port: int) -> dict[str, Any] | None:
     try:
         r = httpx.get(f"http://127.0.0.1:{api_port}/status", timeout=2.0)
     except httpx.HTTPError:
@@ -179,7 +180,7 @@ def _start_daemon() -> int:
     return proc.pid
 
 
-def _wait_for_pool(*, timeout: float = 20.0) -> dict | None:
+def _wait_for_pool(*, timeout: float = 20.0) -> dict[str, Any] | None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         port = _find_broker_port()
