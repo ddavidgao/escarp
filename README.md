@@ -233,6 +233,8 @@ CUA cursor path.
 | `POST /heartbeat` | `{"lease_token": str}` | Refreshed lease |
 | `POST /release` | `{"lease_token": str}` | Lease in `state: free` |
 | `GET  /reaped` | -- | Last 50 TTL-expired reclamations (debug) |
+| `POST /pool/add` | `{"slot": int}` | Hot-register a listening chrome into the running pool, no restart |
+| `POST /pool/remove` | `{"slot": int, "force"?: bool}` | Hot-unregister a slot and drop its lock, no restart |
 
 ## Architecture
 
@@ -260,8 +262,7 @@ the foreground and releases on Ctrl-C. If a holder stops heartbeating, the slot
 is not stolen by another agent; it becomes reclaimable only when the broker
 reaper observes that `expires_at` has passed.
 
-See [V2_PLAN.md](V2_PLAN.md) for the v0→v2 design notes and
-[`research/cua_targeting.md`](research/cua_targeting.md) for the CUA
+See [`research/cua_targeting.md`](research/cua_targeting.md) for the CUA
 addressing analysis.
 
 ## Demos
@@ -311,7 +312,7 @@ slot s  ->  frontend  = 3000 + s*10
 
 ## Status
 
-v1.3.0.
+v1.4.0.
 
 **Claims that hold:**
 - Each native-CUA slot can have a stable per-slot app bundle identity on macOS (`dev.escarp.chrome.slotN`).
@@ -325,7 +326,7 @@ v1.3.0.
 **Claims that do NOT hold (and aren't claimed):**
 - Two concurrent native CUA agents on two windows from the same app bundle. CUA addresses by app, not by window; use `--cua-apps` for native CUA concurrency.
 
-**Not in 1.1:** delegated and supervised identity tiers, cross-machine pooling, Linux/Windows OS-window calibration.
+**Not yet:** delegated and supervised identity tiers, cross-machine pooling, Linux/Windows OS-window calibration.
 
 ## License
 
