@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 from playwright.async_api import async_playwright
-
 
 OUT_DIR = Path("/tmp/escarp-demo")
 PLAN_A: list[tuple[str, str]] = [
@@ -42,7 +41,7 @@ PLAN_B: list[tuple[str, str]] = [
 
 
 def now_stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+    return datetime.now(UTC).strftime("%H:%M:%S.%f")[:-3]
 
 
 def log(label: str, msg: str) -> None:

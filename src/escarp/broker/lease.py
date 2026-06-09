@@ -52,6 +52,8 @@ class LeaseRecord:
     cdp_ws_url: str
     pid: int
     state: str = "free"
+    # Single tier today; see pool_config.DEFAULT_TIER. Surfaced in /status so
+    # clients can already key on it before delegated/supervised tiers land.
     tier: str = "autonomous"
     holder: str | None = None
     dev_port: int | None = None

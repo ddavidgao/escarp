@@ -1,4 +1,4 @@
-"""Escarp v2 broker: control-plane daemon for the worktree browser pool.
+"""Escarp broker: the control plane for the persistent browser-slot pool.
 
 Public surface lives in `daemon` and `cli`.
 """

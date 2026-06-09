@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser(
         "window",
-        help="print and actively verify a slot's OS-window identity (the v1.1 primitive).",
+        help="print and actively verify a slot's OS-window identity.",
         add_help=False,
     )
     focus_parser = sub.add_parser(

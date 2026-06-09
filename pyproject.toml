@@ -13,7 +13,6 @@ keywords = [
     "codex",
     "chrome-devtools-protocol",
     "browser-pool",
-    "worktree",
     "mcp",
 ]
 classifiers = [
@@ -27,7 +26,6 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp>=3.9",
-    "cryptography>=42.0",
     "httpx>=0.28.1",
     "mcp>=1.27.2",
     "pyobjc-framework-applicationservices>=12.2 ; sys_platform == 'darwin'",
@@ -64,7 +62,6 @@ include = [
     "src/escarp/**",
     "README.md",
     "LICENSE",
-    "V2_PLAN.md",
     "pyproject.toml",
 ]
 

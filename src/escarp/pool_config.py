@@ -22,6 +22,10 @@ from pathlib import Path
 
 DEFAULT_POOL_SIZE = 4
 DEFAULT_CDP_BASE = 9222
+# Identity tier. Today there is exactly one tier ("autonomous"); the value is
+# still threaded through because it is a component of the on-disk profile path
+# (~/.escarp/profiles/<tier>/slot-N) and a field in the lease/API record. The
+# delegated/supervised tiers on the README roadmap would add branching here.
 DEFAULT_TIER = "autonomous"
 DEFAULT_CONFIG_PATH = Path.home() / ".escarp" / "pool.json"
 

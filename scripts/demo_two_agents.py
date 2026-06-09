@@ -21,7 +21,6 @@ from pathlib import Path
 import httpx
 from playwright.async_api import async_playwright
 
-
 OUT_DIR = Path("/tmp/escarp-demo")
 
 

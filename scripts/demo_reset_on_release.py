@@ -1,7 +1,7 @@
 """Lease-boundary reset proof.
 
-Per V2_PLAN.md: "on lease release, reset -- never close." This demo shows the
-contract holds end-to-end:
+The reset contract: on lease release, reset the slot -- never close it. This
+demo shows the contract holds end-to-end:
 
     1. Acquire slot 0 via the broker HTTP API.
     2. Drive the leased browser to a real site (YouTube).
@@ -19,7 +19,6 @@ import asyncio
 
 import httpx
 from playwright.async_api import async_playwright
-
 
 BROKER = "http://127.0.0.1:7878"
 

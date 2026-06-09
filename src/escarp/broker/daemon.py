@@ -37,9 +37,8 @@ from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.pool import PoolController, register_browser
 from escarp.broker.slots import SlotBusy, ports_for_slot
-from escarp.pool_config import DEFAULT_CDP_BASE, load_pool_config
+from escarp.pool_config import load_pool_config
 
-DEFAULT_CDP_BASE_PORT = DEFAULT_CDP_BASE
 DAEMON_PIDFILE = Path.home() / ".escarp" / "daemon.pid"
 
 

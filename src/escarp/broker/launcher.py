@@ -26,9 +26,7 @@ from escarp.broker.browser import (
 from escarp.broker.cua_apps import CuaAppError, CuaSlotApp, ensure_cua_slot_app
 from escarp.broker.discovery import probe
 from escarp.broker.slots import profile_dir_for_slot
-
-DEFAULT_POOL_SIZE = 4
-DEFAULT_CDP_BASE = 9222
+from escarp.pool_config import DEFAULT_CDP_BASE, DEFAULT_POOL_SIZE
 
 
 def _spawn_slot_chrome(

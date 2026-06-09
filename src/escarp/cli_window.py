@@ -1,11 +1,11 @@
-"""`escarp window <slot>` -- the OS-window identity primitive.
+"""`escarp window <slot>` -- print and live-verify a slot's OS-window identity.
 
-The mental model for v1.1:
+The mental model:
 
     Escarp leases OS windows, not just CDP endpoints.
     CDP is the automation transport.
     CUA is the visible interaction transport.
-    The OS window identity is the common anchor.
+    The OS-window identity is the common anchor.
 
 This command surfaces the identity AND actively verifies it. A stale
 kCGWindowNumber without verification is just another weak label.

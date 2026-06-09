@@ -1,10 +1,10 @@
-"""Slot allocator: per-worktree atomic claim via flock, plus port derivation.
+"""Slot allocator: atomic per-slot claim via flock, plus port derivation.
 
-Every resource a worktree needs is derived from a single
-integer `slot` index in `[0, pool_size)`. A worktree claims a slot by
-acquiring an exclusive flock on a per-slot lockfile and holding the fd open
-for its entire process lifetime — the kernel releases the lock automatically
-when the holding process exits, which is the entire stale-lock fix.
+Every resource a slot needs (ports, profile dir) is derived from a single
+integer `slot` index in `[0, pool_size)`. A process claims a slot by acquiring
+an exclusive flock on a per-slot lockfile and holding the fd open for its
+entire lifetime: the kernel releases the lock automatically when the holding
+process exits, which is the entire stale-lock fix.
 """
 
 from __future__ import annotations

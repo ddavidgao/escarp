@@ -25,7 +25,6 @@ from pathlib import Path
 import httpx
 from playwright.async_api import async_playwright
 
-
 BROKER = "http://127.0.0.1:7878"
 OUT_DIR = Path("/tmp/escarp-concurrent")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
