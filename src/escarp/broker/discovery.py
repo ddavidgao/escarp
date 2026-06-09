@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
@@ -30,7 +31,7 @@ class DiscoveredBrowser:
     browser_version: str
 
 
-async def probe(cdp_port: int, *, timeout: float = 2.0) -> dict | None:
+async def probe(cdp_port: int, *, timeout: float = 2.0) -> dict[str, Any] | None:
     """GET /json/version on cdp_port. Returns the json dict or None if nothing
     is listening / response unparseable. Per Phase 0 findings, /json/version
     is the right discovery primitive on CfT 149+."""
@@ -38,7 +39,8 @@ async def probe(cdp_port: int, *, timeout: float = 2.0) -> dict | None:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(f"http://127.0.0.1:{cdp_port}/json/version")
             resp.raise_for_status()
-            return resp.json()
+            info: dict[str, Any] = resp.json()
+            return info
     except (httpx.HTTPError, ValueError):
         return None
 
@@ -78,7 +80,7 @@ async def discover_pool(
     return discovered, missing
 
 
-async def _probe_with_retry(cdp_port: int, *, wait_for_each: float) -> dict | None:
+async def _probe_with_retry(cdp_port: int, *, wait_for_each: float) -> dict[str, Any] | None:
     """Best-effort: probe once; if missing and wait_for_each > 0, keep trying
     up to that many seconds. Useful right after `escarp launch-pool` since
     chrome can take a couple seconds to bind its CDP port."""

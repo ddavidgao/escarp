@@ -50,7 +50,7 @@ async def _run(slot: int) -> int:
         cdp_ws_url=target["cdp_ws_url"],
         cg_window_number=target.get("os_window_id"),
         cg_window_owner_pid=target.get("owner_pid"),
-        cg_window_bounds=bounds_tuple,  # type: ignore[arg-type]
+        cg_window_bounds=bounds_tuple,
     )
 
     print(f"slot {slot}  cdp_port={target['cdp_port']}  title='{result.title_set}'")

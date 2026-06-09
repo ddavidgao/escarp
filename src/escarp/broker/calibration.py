@@ -16,6 +16,7 @@ import asyncio
 import json
 import sys
 from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 
@@ -49,10 +50,10 @@ def default_geometry(slot: int, *, cols: int = 2, width: int = 760, height: int 
 async def _cdp_browser_call(
     browser_ws_url: str,
     method: str,
-    params: dict | None = None,
+    params: dict[str, Any] | None = None,
     *,
     timeout: float = 5.0,
-) -> dict:
+) -> dict[str, Any]:
     """One-shot CDP call against a browser-level websocket. Returns the JSON
     response's `result` field (or raises if CDP returned an error)."""
     async with aiohttp.ClientSession() as session, session.ws_connect(browser_ws_url) as ws:
@@ -61,7 +62,8 @@ async def _cdp_browser_call(
         data = json.loads(msg.data)
         if "error" in data:
             raise RuntimeError(f"CDP {method} failed: {data['error']}")
-        return data.get("result", {})
+        result: dict[str, Any] = data.get("result", {})
+        return result
 
 
 async def set_window_bounds(browser_ws_url: str, geom: SlotGeometry) -> tuple[int, str]:

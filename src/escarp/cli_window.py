@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import Any
 
 import httpx
 
@@ -41,7 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _human_readable(slot: dict, verify: dict) -> str:
+def _human_readable(slot: dict[str, Any], verify: dict[str, Any]) -> str:
     bounds = slot.get("bounds")
     bounds_str = (
         f"x={int(bounds[0])} y={int(bounds[1])} w={int(bounds[2])} h={int(bounds[3])}"
@@ -93,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     os_window_id = slot.get("os_window_id")
+    verify: dict[str, Any]
     if os_window_id is None:
         verify = {
             "os_window_id": None,

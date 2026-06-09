@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import sys
 import time
+from typing import Any
 
 import httpx
 
@@ -55,7 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cua_prompt_for(record: dict) -> str:
+def _cua_prompt_for(record: dict[str, Any]) -> str:
     slot = record["slot"]
     bundle_id = record.get("cua_app_bundle_id")
     app_name = record.get("cua_app_name")
@@ -81,14 +82,14 @@ def _cua_prompt_for(record: dict) -> str:
     )
 
 
-def _slot_record(slot: int) -> dict | None:
+def _slot_record(slot: int) -> dict[str, Any] | None:
     resp = httpx.get(f"{broker_url()}/status", timeout=3.0)
     resp.raise_for_status()
     data = resp.json()
     return next((s for s in data["slots"] if s["slot"] == slot), None)
 
 
-def _release_acquired(record: dict) -> None:
+def _release_acquired(record: dict[str, Any]) -> None:
     try:
         httpx.post(
             f"{broker_url()}/release",
@@ -108,17 +109,18 @@ def _lease_ttl_s(default: float = 60.0) -> float:
         return default
 
 
-def _heartbeat(record: dict) -> dict:
+def _heartbeat(record: dict[str, Any]) -> dict[str, Any]:
     resp = httpx.post(
         f"{broker_url()}/heartbeat",
         json={"lease_token": record["lease_token"]},
         timeout=10.0,
     )
     resp.raise_for_status()
-    return resp.json()
+    refreshed: dict[str, Any] = resp.json()
+    return refreshed
 
 
-def _hold_until_interrupted(record: dict) -> int:
+def _hold_until_interrupted(record: dict[str, Any]) -> int:
     interval_s = max(1.0, _lease_ttl_s() / 3)
     print()
     print(
@@ -211,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
                 cdp_ws_url=target["cdp_ws_url"],
                 cg_window_number=target.get("os_window_id"),
                 cg_window_owner_pid=target.get("owner_pid"),
-                cg_window_bounds=bounds_tuple,  # type: ignore[arg-type]
+                cg_window_bounds=bounds_tuple,
             )
         )
         print()

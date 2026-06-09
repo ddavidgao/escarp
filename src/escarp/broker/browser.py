@@ -122,7 +122,7 @@ def _resolve_ws_url(cdp_port: int, *, timeout: float) -> str:
                 timeout=1.0,
             )
             resp.raise_for_status()
-            ws_url = resp.json().get("webSocketDebuggerUrl")
+            ws_url: str | None = resp.json().get("webSocketDebuggerUrl")
             if ws_url:
                 return ws_url
         except Exception as exc:

@@ -18,6 +18,7 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_PATH = Path(os.environ.get("ESCARP_LEASES_FILE", str(Path.home() / ".escarp" / "leases.json")))
 
@@ -92,7 +93,7 @@ def find_by_holder(holder: str, path: Path = DEFAULT_PATH) -> list[LocalLease]:
     return [l for l in _read(path) if l.holder == holder]
 
 
-def make(record_from_broker: dict, holder: str | None = None) -> LocalLease:
+def make(record_from_broker: dict[str, Any], holder: str | None = None) -> LocalLease:
     """Build a LocalLease from a broker /acquire response."""
     return LocalLease(
         slot=record_from_broker["slot"],

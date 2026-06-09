@@ -39,7 +39,7 @@ def enumerate_cft_windows() -> list[CGWindowInfo]:
     """
     if not _is_darwin():
         return []
-    from Quartz import (  # type: ignore[import-not-found]
+    from Quartz import (
         CGWindowListCopyWindowInfo,
         kCGNullWindowID,
         kCGWindowListOptionOnScreenOnly,
@@ -123,7 +123,7 @@ def raise_window_by_bounds(
     if not _is_darwin():
         return False
     try:
-        from ApplicationServices import (  # type: ignore[import-not-found]
+        from ApplicationServices import (
             AXUIElementCopyAttributeValue,
             AXUIElementCreateApplication,
             AXUIElementPerformAction,
@@ -133,7 +133,7 @@ def raise_window_by_bounds(
             kAXSizeAttribute,
             kAXWindowsAttribute,
         )
-        from Quartz import (  # type: ignore[import-not-found]
+        from Quartz import (
             CGPointZero,
             CGSizeZero,
         )
@@ -170,7 +170,7 @@ def raise_window_by_bounds(
             and abs(sh - th) <= tolerance
         ):
             err = AXUIElementPerformAction(w, kAXRaiseAction)
-            return err == kAXErrorSuccess
+            return bool(err == kAXErrorSuccess)
 
     return False
 

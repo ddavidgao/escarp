@@ -85,6 +85,12 @@ python_version = "3.11"
 strict = true
 files = ["src/escarp"]
 
+# pyobjc frameworks ship no type stubs / py.typed marker, so mypy can't analyze
+# them. They are only imported on macOS behind sys.platform guards.
+[[tool.mypy.overrides]]
+module = ["Quartz", "ApplicationServices"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
