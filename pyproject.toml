@@ -1,6 +1,6 @@
 [project]
 name = "escarp"
-version = "1.4.0"
+version = "1.4.1"
 description = "Identity-aware runtime for parallel coding agents -- persistent browser pool + lease broker over CDP"
 authors = [{ name = "David Gao", email = "davidgao1345@gmail.com" }]
 license = { text = "MIT" }

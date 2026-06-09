@@ -288,7 +288,7 @@ escarp acquire --slot 0 --holder cua-demo --prompt --hold
 
 ## Status
 
-v1.4.0.
+v1.4.1.
 
 **Holds today:**
 - Each native-CUA slot has a stable per-slot app bundle identity on macOS (`dev.escarp.chrome.slotN`).
