@@ -11,10 +11,12 @@ mostly metadata until files diverge.
 
 from __future__ import annotations
 
+import importlib
 import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,6 +115,72 @@ def existing_cua_slot_app(slot: int, *, root: Path | None = None) -> CuaSlotApp 
         bundle_id=bundle_id,
         display_name=display_name,
     )
+
+
+def running_slot_app_pids(slot: int) -> list[int]:
+    """Return running macOS app PIDs for this slot's bundle identity."""
+    if sys.platform != "darwin":
+        return []
+    try:
+        appkit = importlib.import_module("AppKit")
+    except ImportError:
+        return []
+
+    apps = appkit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(
+        slot_bundle_id(slot)
+    )
+    return [int(app.processIdentifier()) for app in apps]
+
+
+def terminate_cua_slot_app_processes(
+    slot: int,
+    *,
+    exclude_pids: set[int] | None = None,
+    grace: float = 3.0,
+) -> list[int]:
+    """Terminate running macOS app instances for a slot bundle identity.
+
+    CDP-port ownership is not sufficient in CUA app mode: a stale app process can
+    remain visible after losing its debugging port. If Escarp then launches a new
+    process for the same slot, macOS shows duplicate "Escarp Chrome Slot N"
+    windows. This helper reconciles by the slot's bundle ID before relaunching
+    or deleting slot data.
+
+    Returns the PIDs that were targeted.
+    """
+    if sys.platform != "darwin":
+        return []
+    try:
+        appkit = importlib.import_module("AppKit")
+    except ImportError:
+        return []
+
+    exclude_pids = exclude_pids or set()
+    bundle_id = slot_bundle_id(slot)
+
+    def targets():
+        return [
+            app
+            for app in appkit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(
+                bundle_id
+            )
+            if int(app.processIdentifier()) not in exclude_pids
+        ]
+
+    apps = targets()
+    pids = [int(app.processIdentifier()) for app in apps]
+    for app in apps:
+        app.terminate()
+
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not targets():
+            return pids
+        time.sleep(0.1)
+
+    for app in targets():
+        app.forceTerminate()
+    return pids
 
 
 def _clone_app(source_app: Path, app_path: Path) -> None:

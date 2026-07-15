@@ -14,7 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from escarp.broker.browser import BrowserLaunchError, ManagedBrowser
-from escarp.broker.launcher import launch_pool
+from escarp.broker.cua_apps import CuaSlotApp
+from escarp.broker.launcher import ensure_slot_chrome, launch_pool
 
 
 def _fake_browser(slot: int, cdp_port: int, tmp_path: Path) -> ManagedBrowser:
@@ -104,3 +105,45 @@ async def test_launch_pool_succeeds_if_all_slots_already_up(
 
     assert rc == 0
     assert launched == []  # nothing launched, everything was already up
+
+
+async def test_ensure_slot_chrome_cleans_stale_cua_app_before_launch(
+    fake_binary: Path, tmp_path: Path
+) -> None:
+    calls: list[str] = []
+    slot_app = CuaSlotApp(
+        slot=1,
+        app_path=tmp_path / "Escarp Chrome Slot 1.app",
+        binary_path=fake_binary,
+        bundle_id="dev.escarp.chrome.slot1",
+        display_name="Escarp Chrome Slot 1",
+    )
+
+    async def fake_probe(cdp_port: int, *, timeout: float = 0.5) -> dict | None:
+        return None
+
+    def fake_terminate(slot: int) -> list[int]:
+        calls.append(f"terminate:{slot}")
+        return [123]
+
+    def fake_ensure_app(*, slot: int, cft_binary: Path) -> CuaSlotApp:
+        calls.append(f"ensure-app:{slot}")
+        return slot_app
+
+    def fake_launch_cft(*, slot: int, binary: Path, profile_dir: Path, cdp_port: int) -> ManagedBrowser:
+        calls.append(f"launch:{slot}")
+        return _fake_browser(slot, cdp_port, tmp_path)
+
+    with patch("escarp.broker.launcher.probe", side_effect=fake_probe), \
+         patch("escarp.broker.launcher.terminate_cua_slot_app_processes", side_effect=fake_terminate), \
+         patch("escarp.broker.launcher.ensure_cua_slot_app", side_effect=fake_ensure_app), \
+         patch("escarp.broker.launcher.launch_cft", side_effect=fake_launch_cft):
+        launched = await ensure_slot_chrome(
+            slot=1,
+            cft_binary=fake_binary,
+            cdp_base_port=9322,
+            cua_apps=True,
+        )
+
+    assert launched is True
+    assert calls == ["terminate:1", "ensure-app:1", "launch:1"]

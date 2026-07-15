@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import plistlib
+import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,9 +13,11 @@ from escarp.broker.cua_apps import (
     CuaAppError,
     ensure_cua_slot_app,
     existing_cua_slot_app,
+    running_slot_app_pids,
     slot_bundle_id,
     slot_display_name,
     source_app_from_binary,
+    terminate_cua_slot_app_processes,
 )
 
 
@@ -95,3 +99,65 @@ def test_existing_cua_slot_app_detects_materialized_app(tmp_path: Path) -> None:
 
     found = existing_cua_slot_app(3, root=tmp_path / "apps")
     assert found == created
+
+
+def test_running_slot_app_pids_uses_slot_bundle_id(monkeypatch) -> None:
+    seen: list[str] = []
+
+    class FakeApp:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def processIdentifier(self) -> int:
+            return self.pid
+
+    class FakeNSRunningApplication:
+        @staticmethod
+        def runningApplicationsWithBundleIdentifier_(bundle_id: str):
+            seen.append(bundle_id)
+            return [FakeApp(101), FakeApp(202)]
+
+    fake_appkit = types.SimpleNamespace(NSRunningApplication=FakeNSRunningApplication)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setitem(sys.modules, "AppKit", fake_appkit)
+
+    assert running_slot_app_pids(7) == [101, 202]
+    assert seen == ["dev.escarp.chrome.slot7"]
+
+
+def test_terminate_cua_slot_app_processes_excludes_current_pid(monkeypatch) -> None:
+    terminated: list[int] = []
+    forced: list[int] = []
+    calls = 0
+
+    class FakeApp:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def processIdentifier(self) -> int:
+            return self.pid
+
+        def terminate(self) -> None:
+            terminated.append(self.pid)
+
+        def forceTerminate(self) -> None:
+            forced.append(self.pid)
+
+    class FakeNSRunningApplication:
+        @staticmethod
+        def runningApplicationsWithBundleIdentifier_(bundle_id: str):
+            nonlocal calls
+            calls += 1
+            # First call sees stale + current. Polling calls see only the
+            # excluded/current app, so graceful termination is enough.
+            if calls == 1:
+                return [FakeApp(111), FakeApp(222)]
+            return [FakeApp(222)]
+
+    fake_appkit = types.SimpleNamespace(NSRunningApplication=FakeNSRunningApplication)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setitem(sys.modules, "AppKit", fake_appkit)
+
+    assert terminate_cua_slot_app_processes(1, exclude_pids={222}) == [111]
+    assert terminated == [111]
+    assert forced == []

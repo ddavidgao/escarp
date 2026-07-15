@@ -31,7 +31,9 @@ def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0):
     monkeypatch.setattr(cs, "launch_pool", fake_launch)
     monkeypatch.setattr(cs, "resolve_cft_binary", lambda cfg: Path("/fake/cft"))
     monkeypatch.setattr(
-        cs, "terminate_chrome_on_port", lambda port, **k: (calls["terminate"].append(port) or True)
+        cs,
+        "terminate_slot_chromes",
+        lambda slot, port, **k: (calls["terminate"].append(port) or True),
     )
     monkeypatch.setattr(cs, "remove_slot_data", lambda slot, **k: calls["remove_data"].append(slot))
     monkeypatch.setattr(cs, "_leased_slots_among", lambda slots: list(leased or []))

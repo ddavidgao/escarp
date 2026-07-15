@@ -22,7 +22,11 @@ import httpx
 
 from escarp.broker.api import DEFAULT_PORT
 from escarp.broker.browser import find_cft_binary
-from escarp.broker.cua_apps import existing_cua_slot_app, slot_app_path
+from escarp.broker.cua_apps import (
+    existing_cua_slot_app,
+    slot_app_path,
+    terminate_cua_slot_app_processes,
+)
 from escarp.broker.slots import DEFAULT_LOCK_DIR, profile_dir_for_slot
 from escarp.pool_config import DEFAULT_CONFIG_PATH, PoolConfig
 
@@ -118,6 +122,19 @@ def terminate_chrome_on_port(port: int, *, grace: float = 3.0) -> bool:
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
     return True
+
+
+def terminate_slot_chromes(slot: int, port: int, *, cua_apps: bool, grace: float = 3.0) -> bool:
+    """Terminate all known Chrome processes for a slot.
+
+    In standard mode the CDP port identifies the process. In CUA app mode, also
+    reconcile by the per-slot macOS bundle identity so stale app windows that no
+    longer own the CDP port do not survive remove/scale-down and later duplicate.
+    """
+    killed = terminate_chrome_on_port(port, grace=grace)
+    if cua_apps:
+        killed = bool(terminate_cua_slot_app_processes(slot, grace=grace)) or killed
+    return killed
 
 
 def remove_slot_data(slot: int, *, cua_apps: bool) -> None:

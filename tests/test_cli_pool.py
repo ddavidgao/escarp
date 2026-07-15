@@ -41,7 +41,11 @@ def _patch(monkeypatch, *, broker_port=7878, present=(0, 1, 2, 3, 4, 5), post_st
 
     monkeypatch.setattr(cp, "ensure_slot_chrome", fake_ensure)
     monkeypatch.setattr(cp.httpx, "post", fake_post)
-    monkeypatch.setattr(cp, "terminate_chrome_on_port", lambda port, **k: calls["terminate"].append(port) or True)
+    monkeypatch.setattr(
+        cp,
+        "terminate_slot_chromes",
+        lambda slot, port, **k: calls["terminate"].append(port) or True,
+    )
     monkeypatch.setattr(cp, "remove_slot_data", lambda slot, **k: calls["remove_data"].append(slot))
     monkeypatch.setattr(cp, "save_pool_config", lambda cfg, path=None: calls["saved"].append(cfg))
     return calls

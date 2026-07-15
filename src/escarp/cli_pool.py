@@ -30,7 +30,7 @@ from escarp.slot_ops import (
     remove_slot_data,
     resolve_cft_binary,
     resolve_cua_apps,
-    terminate_chrome_on_port,
+    terminate_slot_chromes,
 )
 
 
@@ -151,7 +151,7 @@ def _remove(args: argparse.Namespace) -> int:
     print(f"[slot {slot}] removed from the live pool (no daemon restart).")
 
     if not args.keep_chrome:
-        killed = terminate_chrome_on_port(cdp_base + slot)
+        killed = terminate_slot_chromes(slot, cdp_base + slot, cua_apps=cfg.cua_apps)
         print(
             f"[slot {slot}] chrome on cdp_port {cdp_base + slot}: "
             f"{'terminated' if killed else 'not running'}"

@@ -23,7 +23,12 @@ from escarp.broker.browser import (
     find_cft_binary,
     launch_cft,
 )
-from escarp.broker.cua_apps import CuaAppError, CuaSlotApp, ensure_cua_slot_app
+from escarp.broker.cua_apps import (
+    CuaAppError,
+    CuaSlotApp,
+    ensure_cua_slot_app,
+    terminate_cua_slot_app_processes,
+)
 from escarp.broker.discovery import probe
 from escarp.broker.slots import profile_dir_for_slot
 from escarp.pool_config import DEFAULT_CDP_BASE, DEFAULT_POOL_SIZE
@@ -44,6 +49,7 @@ def _spawn_slot_chrome(
     binary = cft_binary
     slot_app: CuaSlotApp | None = None
     if cua_apps:
+        terminate_cua_slot_app_processes(slot)
         slot_app = ensure_cua_slot_app(slot=slot, cft_binary=cft_binary)
         binary = slot_app.binary_path
     browser = launch_cft(slot=slot, binary=binary, profile_dir=profile, cdp_port=cdp_port)

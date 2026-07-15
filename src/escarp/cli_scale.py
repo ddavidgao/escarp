@@ -45,7 +45,7 @@ from escarp.slot_ops import (
     remove_slot_data,
     resolve_cft_binary,
     resolve_cua_apps,
-    terminate_chrome_on_port,
+    terminate_slot_chromes,
 )
 
 # How far above the target we scan when measuring reality, so a scale-down can
@@ -272,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     # 4. Scale down: terminate the excess chromes (the daemon never would).
     for slot in to_remove:
         port = cdp_base + slot
-        killed = terminate_chrome_on_port(port)
+        killed = terminate_slot_chromes(slot, port, cua_apps=cua_apps)
         print(f"[slot {slot}] chrome on cdp_port {port}: {'terminated' if killed else 'not running'}")
         if not args.keep_data:
             remove_slot_data(slot, cua_apps=cua_apps)
