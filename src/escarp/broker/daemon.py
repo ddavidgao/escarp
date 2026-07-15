@@ -3,8 +3,11 @@
 **Does NOT own chrome lifecycles.** Per the persistence contract,
 chromes are infrastructure that exists independently. To start the chromes,
 run `escarp launch-pool` (or launchd, systemd, docker, manual shell, whatever).
-This daemon's only relationship to a chrome is "discover via /json/version,
-talk to it over CDP, never kill it."
+This daemon's only relationship to a *healthy* chrome is "discover via
+/json/version, talk to it over CDP, never kill it." The one carve-out is the
+process sweep (broker/sweep.py): dead weight -- an orphaned escarp chrome the
+broker doesn't track, or a brokered chrome whose CDP stopped answering -- is
+reaped so it can't accumulate for days. Disable with ESCARP_SWEEP_INTERVAL_S=0.
 
 End-to-end shape:
 
@@ -37,6 +40,7 @@ from escarp.broker.discovery import DiscoveredBrowser, discover_pool
 from escarp.broker.lease import Broker, reaper_loop
 from escarp.broker.pool import PoolController, register_browser
 from escarp.broker.slots import SlotBusy, ports_for_slot
+from escarp.broker.sweep import DEFAULT_SWEEP_INTERVAL_S, sweep_loop
 from escarp.pool_config import load_pool_config
 
 DAEMON_PIDFILE = Path.home() / ".escarp" / "daemon.pid"
@@ -84,6 +88,7 @@ async def run_daemon(
     api_port: int,
     lease_ttl_s: float,
     discovery_wait_s: float,
+    sweep_interval_s: float = DEFAULT_SWEEP_INTERVAL_S,
 ) -> int:
     browsers: list[DiscoveredBrowser] = []
 
@@ -98,6 +103,7 @@ async def run_daemon(
     controller = PoolController(broker, cdp_base=cdp_base_port)
     runner: web.AppRunner | None = None
     reaper_task: asyncio.Task[None] | None = None
+    sweep_task: asyncio.Task[None] | None = None
     stop_event = asyncio.Event()
 
     try:
@@ -155,12 +161,21 @@ async def run_daemon(
         runner, actual_port = await _serve_http(broker, api_port, controller)
         _write_pidfile(api_port=actual_port)
         reaper_task = asyncio.create_task(reaper_loop(broker, stop=stop_event))
+        if sweep_interval_s > 0:
+            sweep_task = asyncio.create_task(
+                sweep_loop(broker, controller, interval_s=sweep_interval_s, stop=stop_event)
+            )
 
         print()
         print(_format_table(browsers))
         print()
         print(f"broker http api:  http://127.0.0.1:{actual_port}")
         print(f"lease ttl:        {lease_ttl_s}s   reaper interval: 2s")
+        print(
+            f"process sweep:    every {sweep_interval_s:.0f}s (orphaned/dead chromes)"
+            if sweep_interval_s > 0
+            else "process sweep:    disabled (ESCARP_SWEEP_INTERVAL_S=0)"
+        )
         print(f"try: curl http://127.0.0.1:{actual_port}/status | jq")
         print(
             f"\npool of {len(browsers)} brokered. chromes are NOT owned by this daemon "
@@ -178,11 +193,12 @@ async def run_daemon(
         return 0
     finally:
         stop_event.set()
-        if reaper_task is not None:
-            try:
-                await asyncio.wait_for(reaper_task, timeout=3.0)
-            except (TimeoutError, asyncio.CancelledError):
-                reaper_task.cancel()
+        for task in (reaper_task, sweep_task):
+            if task is not None:
+                try:
+                    await asyncio.wait_for(task, timeout=3.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    task.cancel()
         if runner is not None:
             await runner.cleanup()
         controller.release_all()
@@ -212,11 +228,15 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_pool_config()
     pool_size = _env_int("ESCARP_POOL_SIZE", cfg.pool_size)
     if pool_size < 1:
-        raise SystemExit(f"pool size must be >= 1, got {pool_size}")
+        raise SystemExit(
+            f"pool size must be >= 1, got {pool_size} "
+            f"(the pool is torn down; run `escarp scale N` to recreate it)"
+        )
     cdp_base_port = _env_int("ESCARP_CDP_BASE", cfg.cdp_base)
     api_port = _env_int("ESCARP_API_PORT", DEFAULT_PORT)
     lease_ttl_s = float(os.environ.get("ESCARP_LEASE_TTL_S", "60"))
     discovery_wait_s = float(os.environ.get("ESCARP_DISCOVERY_WAIT_S", "0"))
+    sweep_interval_s = float(os.environ.get("ESCARP_SWEEP_INTERVAL_S", str(DEFAULT_SWEEP_INTERVAL_S)))
 
     try:
         return asyncio.run(
@@ -226,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
                 api_port=api_port,
                 lease_ttl_s=lease_ttl_s,
                 discovery_wait_s=discovery_wait_s,
+                sweep_interval_s=sweep_interval_s,
             )
         )
     except KeyboardInterrupt:

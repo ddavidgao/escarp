@@ -22,7 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser(
         "daemon",
-        help="discover already-running chromes and broker leases against them.",
+        help="discover already-running chromes and broker leases against them "
+        "(`daemon stop` stops it; add --kill-pool for a full teardown).",
     )
     sub.add_parser(
         "window",
@@ -71,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
         from escarp.broker.launcher import main as launch_main
         return launch_main(rest)
     if args.command == "daemon":
+        if rest[:1] == ["stop"]:
+            from escarp.cli_daemon import stop_main
+            return stop_main(rest[1:])
         from escarp.broker.daemon import main as daemon_main
         return daemon_main(rest)
     if args.command == "window":

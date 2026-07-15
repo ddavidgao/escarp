@@ -19,6 +19,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_CUA_APPS_DIR = Path.home() / ".escarp" / "cua-apps"
 BASE_BUNDLE_ID = "dev.escarp.chrome"
@@ -158,7 +159,7 @@ def terminate_cua_slot_app_processes(
     exclude_pids = exclude_pids or set()
     bundle_id = slot_bundle_id(slot)
 
-    def targets():
+    def targets() -> list[Any]:
         return [
             app
             for app in appkit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(

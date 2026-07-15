@@ -10,11 +10,20 @@ from __future__ import annotations
 from pathlib import Path
 
 import escarp.cli_scale as cs
+from escarp.broker.procs import ChromeProc
 from escarp.pool_config import PoolConfig
 
 
-def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0):
-    calls = {"launch": [], "terminate": [], "remove_data": [], "restart": 0, "saved": []}
+def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0, procs=None, daemon_pid=4242):
+    calls = {
+        "launch": [],
+        "terminate": [],
+        "remove_data": [],
+        "restart": 0,
+        "saved": [],
+        "reap": [],
+        "stop": [],
+    }
 
     async def fake_scan(cdp_base, upper, *, timeout=0.3):
         return set(live)
@@ -28,6 +37,8 @@ def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0):
         return restart_rc
 
     monkeypatch.setattr(cs, "_scan_live_slots", fake_scan)
+    monkeypatch.setattr(cs, "scan_escarp_chromes", lambda **k: list(procs or []))
+    monkeypatch.setattr(cs, "terminate_pids", lambda pids, **k: calls["reap"].append(list(pids)) or list(pids))
     monkeypatch.setattr(cs, "launch_pool", fake_launch)
     monkeypatch.setattr(cs, "resolve_cft_binary", lambda cfg: Path("/fake/cft"))
     monkeypatch.setattr(
@@ -38,6 +49,8 @@ def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0):
     monkeypatch.setattr(cs, "remove_slot_data", lambda slot, **k: calls["remove_data"].append(slot))
     monkeypatch.setattr(cs, "_leased_slots_among", lambda slots: list(leased or []))
     monkeypatch.setattr(cs, "_restart_daemon", fake_restart)
+    monkeypatch.setattr(cs, "find_daemon_pid", lambda: daemon_pid)
+    monkeypatch.setattr(cs, "stop_daemon", lambda pid, **k: calls["stop"].append(pid) or True)
     monkeypatch.setattr(cs, "save_pool_config", lambda cfg, path=None: calls["saved"].append(cfg))
     monkeypatch.setattr(
         cs, "load_pool_config", lambda path=None: PoolConfig(pool_size=4, cdp_base=9222, cua_apps=True)
@@ -120,5 +133,73 @@ def test_fills_interior_gap_on_scale_up(monkeypatch) -> None:
     assert calls["terminate"] == []  # slot 5 is below target, not removed
 
 
-def test_size_must_be_positive(monkeypatch) -> None:
-    assert cs.main(["0"]) == 2
+def test_size_must_be_nonnegative(monkeypatch) -> None:
+    assert cs.main(["-1"]) == 2
+
+
+def test_scale_zero_tears_down_pool_and_stops_daemon(monkeypatch) -> None:
+    calls = _patch_common(monkeypatch, live={0, 1})
+    rc = cs.main(["0", "--cua-apps"])
+    assert rc == 0
+    assert calls["launch"] == []
+    assert sorted(calls["terminate"]) == [9222, 9223]
+    assert sorted(calls["remove_data"]) == [0, 1]
+    assert calls["saved"][0].pool_size == 0
+    assert calls["stop"] == [4242]  # daemon stopped, not restarted
+    assert calls["restart"] == 0
+
+
+def test_scale_zero_without_daemon_still_succeeds(monkeypatch) -> None:
+    calls = _patch_common(monkeypatch, live={0}, daemon_pid=None)
+    rc = cs.main(["0", "--cua-apps"])
+    assert rc == 0
+    assert calls["terminate"] == [9222]
+    assert calls["stop"] == []
+
+
+def test_scale_zero_refuses_leased_without_force(monkeypatch) -> None:
+    calls = _patch_common(monkeypatch, live={0, 1}, leased=[1])
+    assert cs.main(["0", "--cua-apps"]) == 3
+    assert calls["terminate"] == []
+    assert calls["stop"] == []
+
+
+def test_reaps_cdp_dead_chromes_on_scale_down(monkeypatch) -> None:
+    # Slots 0-1 answer CDP; pids 900/901 are escarp chromes with no listener
+    # (crashed or beyond the scan window). They must die even though the port
+    # scan can't see them -- this is the accumulation bug.
+    calls = _patch_common(
+        monkeypatch,
+        live={0, 1},
+        procs=[
+            ChromeProc(pid=900, slot=17, command="c"),
+            ChromeProc(pid=901, slot=None, command="c"),
+            ChromeProc(pid=902, slot=0, command="c"),  # healthy keeper: untouched
+        ],
+    )
+    rc = cs.main(["1", "--cua-apps"])
+    assert rc == 0
+    assert calls["reap"] == [[900, 901]]
+    assert 17 in calls["remove_data"]  # dead slot's data cleaned
+    assert calls["terminate"] == [9223]  # live slot 1 removed via port kill
+
+
+def test_reaps_dead_keeper_slot_before_relaunch(monkeypatch) -> None:
+    # Slot 1 is below target but CDP-dead: kill the corpse first, then the
+    # launch step refills it. Its profile must survive for the relaunch.
+    calls = _patch_common(
+        monkeypatch,
+        live={0},
+        procs=[ChromeProc(pid=910, slot=1, command="c")],
+    )
+    rc = cs.main(["2", "--cua-apps"])
+    assert rc == 0
+    assert calls["reap"] == [[910]]
+    assert calls["remove_data"] == []
+    assert calls["launch"] == [(2, 9222, True)]
+
+
+def test_dry_run_skips_dead_proc_reap(monkeypatch) -> None:
+    calls = _patch_common(monkeypatch, live={0}, procs=[ChromeProc(pid=920, slot=9, command="c")])
+    assert cs.main(["1", "--cua-apps", "--dry-run"]) == 0
+    assert calls["reap"] == []

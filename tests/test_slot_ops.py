@@ -3,6 +3,30 @@
 from __future__ import annotations
 
 from escarp import slot_ops
+from escarp.broker.procs import ChromeProc
+
+
+def test_terminate_slot_chromes_kills_port_dead_stray(monkeypatch) -> None:
+    # A crashed chrome holds no LISTEN socket, so the port kill finds nothing;
+    # the profile-signature scan must still reap it.
+    killed: list[list[int]] = []
+    monkeypatch.setattr(slot_ops, "pids_listening_on", lambda port: [])
+    monkeypatch.setattr(
+        slot_ops,
+        "scan_escarp_chromes",
+        lambda **k: [ChromeProc(pid=333, slot=2, command="c"), ChromeProc(pid=444, slot=3, command="c")],
+    )
+    monkeypatch.setattr(slot_ops, "terminate_pids", lambda pids, **k: killed.append(list(pids)) or list(pids))
+
+    assert slot_ops.terminate_slot_chromes(2, 9224, cua_apps=False) is True
+    assert killed == [[333]]  # only slot 2's stray, not slot 3's
+
+
+def test_terminate_slot_chromes_reports_nothing_to_kill(monkeypatch) -> None:
+    monkeypatch.setattr(slot_ops, "pids_listening_on", lambda port: [])
+    monkeypatch.setattr(slot_ops, "scan_escarp_chromes", lambda **k: [])
+
+    assert slot_ops.terminate_slot_chromes(2, 9224, cua_apps=False) is False
 
 
 def test_find_broker_port_honors_broker_url(monkeypatch) -> None:

@@ -27,6 +27,8 @@ from escarp.broker.cua_apps import (
     slot_app_path,
     terminate_cua_slot_app_processes,
 )
+from escarp.broker.daemon import DAEMON_PIDFILE
+from escarp.broker.procs import pid_alive, scan_escarp_chromes, terminate_pids
 from escarp.broker.slots import DEFAULT_LOCK_DIR, profile_dir_for_slot
 from escarp.pool_config import DEFAULT_CONFIG_PATH, PoolConfig
 
@@ -134,7 +136,47 @@ def terminate_slot_chromes(slot: int, port: int, *, cua_apps: bool, grace: float
     killed = terminate_chrome_on_port(port, grace=grace)
     if cua_apps:
         killed = bool(terminate_cua_slot_app_processes(slot, grace=grace)) or killed
+    # Port and bundle identity both miss a plain-mode chrome that crashed off
+    # its CDP port; the profile-dir process signature is the ground truth.
+    strays = [p.pid for p in scan_escarp_chromes() if p.slot == slot]
+    if strays:
+        killed = bool(terminate_pids(strays, grace=grace)) or killed
     return killed
+
+
+def read_daemon_pidfile() -> tuple[int, int] | None:
+    """Return (pid, api_port) from the daemon pidfile, or None if absent/corrupt."""
+    try:
+        parts = DAEMON_PIDFILE.read_text().split()
+        return int(parts[0]), (int(parts[1]) if len(parts) > 1 else DEFAULT_PORT)
+    except (FileNotFoundError, ValueError, IndexError):
+        return None
+
+
+def find_daemon_pid() -> int | None:
+    """The running daemon's pid: the pidfile if that pid is alive, else whoever
+    is listening on the broker port. None if no daemon is running."""
+    info = read_daemon_pidfile()
+    if info is not None and pid_alive(info[0]):
+        return info[0]
+    port = find_broker_port()
+    if port is not None:
+        pids = pids_listening_on(port)
+        if pids:
+            return pids[0]
+    return None
+
+
+def stop_daemon(pid: int, *, grace: float = 8.0) -> bool:
+    """SIGTERM the daemon and wait for it to exit. Returns True once it is gone."""
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        time.sleep(0.15)
+    return not pid_alive(pid)
 
 
 def remove_slot_data(slot: int, *, cua_apps: bool) -> None:
