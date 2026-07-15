@@ -3,8 +3,10 @@
 The daemon never kills healthy chromes, so a plain stop leaves the pool
 running (the persistence contract): leases are unbrokered, slot locks release,
 chromes stay alive for the next `escarp daemon`. Pass --kill-pool to also
-terminate every escarp-owned chrome afterward -- the same full teardown
-`escarp scale 0` performs, minus persisting a new size.
+terminate every escarp-owned chrome afterward -- processes only: profiles,
+cua app bundles, and lockfiles stay on disk (`escarp scale 0` is the full
+teardown that also removes those and persists the new size). --kill-pool
+refuses while any slot is leased unless --force is given.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import sys
 
 from escarp.broker.daemon import DAEMON_PIDFILE
 from escarp.broker.procs import scan_escarp_chromes, terminate_pids
-from escarp.slot_ops import find_daemon_pid, read_daemon_pidfile, stop_daemon
+from escarp.slot_ops import find_daemon_pid, leased_slots, read_daemon_pidfile, stop_daemon
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -28,12 +30,28 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also terminate every escarp-owned chrome (full teardown)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --kill-pool, kill chromes even if their slot is leased",
+    )
     parser.add_argument("--grace", type=float, default=8.0, help="seconds to wait for a clean exit")
     return parser
 
 
 def stop_main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    # The lease check must run while the broker is still up to answer it.
+    if args.kill_pool and not args.force:
+        leased = leased_slots()
+        if leased:
+            print(
+                f"refusing --kill-pool: slot(s) {leased} are leased to an agent. "
+                f"Re-run with --force to override.",
+                file=sys.stderr,
+            )
+            return 3
 
     rc = 0
     pid = find_daemon_pid()

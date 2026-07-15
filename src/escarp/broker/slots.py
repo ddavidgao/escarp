@@ -63,6 +63,26 @@ class SlotBusy(Exception):
     """Raised when a slot is already claimed by another process."""
 
 
+def slot_lock_held(slot: int, *, lock_dir: Path | None = None) -> bool:
+    """True if some process currently holds this slot's flock, i.e. a broker
+    is brokering it. Non-destructive probe: try the lock non-blocking and
+    release it immediately. A missing lockfile means nobody holds it."""
+    lock_path = (lock_dir or DEFAULT_LOCK_DIR) / f"slot-{slot}.lock"
+    try:
+        fd = os.open(lock_path, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
 def claim_slot(
     slot: int,
     *,

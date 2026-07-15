@@ -68,3 +68,44 @@ def test_broker_url_preserves_nonlocal_broker(monkeypatch) -> None:
     monkeypatch.setenv("ESCARP_BROKER_URL", "https://broker.example.test/escarp/")
 
     assert slot_ops.broker_url() == "https://broker.example.test/escarp"
+
+
+def test_find_daemon_pid_rejects_reused_pidfile_pid(monkeypatch, tmp_path) -> None:
+    # The pidfile survives crashes and reboots; if its pid now belongs to an
+    # unrelated process, never signal it -- clean the stale pidfile instead.
+    pidfile = tmp_path / "daemon.pid"
+    pidfile.write_text("12345 7878\n")
+    monkeypatch.setattr(slot_ops, "DAEMON_PIDFILE", pidfile)
+    monkeypatch.setattr(slot_ops, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(slot_ops, "_pid_command", lambda pid: "/usr/bin/unrelated-tool --serve")
+    monkeypatch.setattr(slot_ops, "find_broker_port", lambda: None)
+
+    assert slot_ops.find_daemon_pid() is None
+    assert not pidfile.exists()
+
+
+def test_find_daemon_pid_trusts_verified_daemon(monkeypatch, tmp_path) -> None:
+    pidfile = tmp_path / "daemon.pid"
+    pidfile.write_text("12345 7878\n")
+    monkeypatch.setattr(slot_ops, "DAEMON_PIDFILE", pidfile)
+    monkeypatch.setattr(slot_ops, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(
+        slot_ops, "_pid_command", lambda pid: "/x/.venv/bin/python /x/.venv/bin/escarp daemon"
+    )
+
+    assert slot_ops.find_daemon_pid() == 12345
+    assert pidfile.exists()
+
+
+def test_find_daemon_pid_keeps_pidfile_when_ps_unreadable(monkeypatch, tmp_path) -> None:
+    # ps failing proves nothing about identity: fall through to the port probe
+    # without signaling and without deleting the pidfile.
+    pidfile = tmp_path / "daemon.pid"
+    pidfile.write_text("12345 7878\n")
+    monkeypatch.setattr(slot_ops, "DAEMON_PIDFILE", pidfile)
+    monkeypatch.setattr(slot_ops, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(slot_ops, "_pid_command", lambda pid: "")
+    monkeypatch.setattr(slot_ops, "find_broker_port", lambda: None)
+
+    assert slot_ops.find_daemon_pid() is None
+    assert pidfile.exists()

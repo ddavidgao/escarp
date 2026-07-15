@@ -14,7 +14,9 @@ from escarp.broker.procs import ChromeProc
 from escarp.pool_config import PoolConfig
 
 
-def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0, procs=None, daemon_pid=4242):
+def _patch_common(
+    monkeypatch, *, live, leased=None, restart_rc=0, procs=None, daemon_pid=4242, confirm_live=None
+):
     calls = {
         "launch": [],
         "terminate": [],
@@ -24,9 +26,18 @@ def _patch_common(monkeypatch, *, live, leased=None, restart_rc=0, procs=None, d
         "reap": [],
         "stop": [],
     }
+    # The sweep-grade confirmation re-probe agrees with the fast scan unless a
+    # test says otherwise (confirm_live simulates a busy chrome that missed
+    # the fast probe but answers the longer one).
+    confirm = set(live) if confirm_live is None else set(confirm_live)
 
     async def fake_scan(cdp_base, upper, *, timeout=0.3):
         return set(live)
+
+    async def fake_probe(port, *, timeout=2.0):
+        return {"Browser": "x"} if (port - 9222) in confirm else None
+
+    monkeypatch.setattr(cs, "probe", fake_probe)
 
     async def fake_launch(*, pool_size, cdp_base_port, cft_binary, cua_apps):
         calls["launch"].append((pool_size, cdp_base_port, cua_apps))
@@ -203,3 +214,52 @@ def test_dry_run_skips_dead_proc_reap(monkeypatch) -> None:
     calls = _patch_common(monkeypatch, live={0}, procs=[ChromeProc(pid=920, slot=9, command="c")])
     assert cs.main(["1", "--cua-apps", "--dry-run"]) == 0
     assert calls["reap"] == []
+
+
+def test_leased_dead_proc_refused_without_force(monkeypatch) -> None:
+    # A leased slot whose chrome missed the probes must not be reaped without
+    # --force: killing it yanks the browser out from under a working agent.
+    calls = _patch_common(
+        monkeypatch,
+        live={0},
+        leased=[3],
+        procs=[ChromeProc(pid=950, slot=3, command="c")],
+    )
+    assert cs.main(["1", "--cua-apps"]) == 3
+    assert calls["reap"] == []
+    assert calls["terminate"] == []
+
+
+def test_force_reaps_leased_dead_proc(monkeypatch) -> None:
+    calls = _patch_common(
+        monkeypatch,
+        live={0},
+        leased=[3],
+        procs=[ChromeProc(pid=950, slot=3, command="c")],
+    )
+    assert cs.main(["1", "--cua-apps", "--force"]) == 0
+    assert calls["reap"] == [[950]]
+
+
+def test_confirm_probe_revives_fast_scan_miss(monkeypatch) -> None:
+    # The fast 0.3s scan missed slot 3 but the sweep-grade re-probe answers:
+    # the chrome is alive, so it leaves via the guarded port-removal path
+    # (slot >= target), never the dead-proc reap.
+    calls = _patch_common(
+        monkeypatch,
+        live={0},
+        confirm_live={0, 3},
+        procs=[ChromeProc(pid=960, slot=3, command="c")],
+    )
+    assert cs.main(["1", "--cua-apps"]) == 0
+    assert calls["reap"] == []
+    assert calls["terminate"] == [9225]
+
+
+def test_scale_zero_no_restart_leaves_daemon_alone(monkeypatch) -> None:
+    calls = _patch_common(monkeypatch, live={0, 1})
+    assert cs.main(["0", "--cua-apps", "--no-restart"]) == 0
+    assert sorted(calls["terminate"]) == [9222, 9223]
+    assert calls["saved"][0].pool_size == 0
+    assert calls["stop"] == []
+    assert calls["restart"] == 0

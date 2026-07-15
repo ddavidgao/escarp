@@ -31,6 +31,7 @@ from typing import Any
 from escarp.broker.discovery import probe
 from escarp.broker.launcher import launch_pool
 from escarp.broker.procs import ChromeProc, scan_escarp_chromes, terminate_pids
+from escarp.broker.sweep import DEAD_STRIKES
 from escarp.pool_config import (
     DEFAULT_CONFIG_PATH,
     PoolConfig,
@@ -41,6 +42,7 @@ from escarp.slot_ops import (
     broker_status,
     find_broker_port,
     find_daemon_pid,
+    leased_slots,
     remove_slot_data,
     resolve_cft_binary,
     resolve_cua_apps,
@@ -75,20 +77,31 @@ def _dead_chrome_procs(procs: list[ChromeProc], *, live: set[int]) -> list[Chrom
     return [p for p in procs if p.slot is None or p.slot not in live]
 
 
+async def _confirm_live(slots: set[int], *, cdp_base: int) -> set[int]:
+    """Of the slots the fast scan called dead, which answer a sweep-grade
+    re-probe? The fast scan's miss counts as strike one; only a slot that
+    misses DEAD_STRIKES probes in a row stays dead (mirrors sweep.py, where
+    a transiently stalled CDP is never reaped)."""
+    pending = set(slots)
+    revived: set[int] = set()
+    for _ in range(DEAD_STRIKES - 1):
+        if not pending:
+            break
+        order = sorted(pending)
+        infos = await asyncio.gather(*(probe(cdp_base + s, timeout=2.0) for s in order))
+        answered = {s for s, info in zip(order, infos, strict=True) if info is not None}
+        revived |= answered
+        pending -= answered
+    return revived
+
+
 # --------------------------------------------------------------------------- #
 # Broker queries                                                              #
 # --------------------------------------------------------------------------- #
 def _leased_slots_among(slots: list[int]) -> list[int]:
     """Of `slots`, which are currently leased (so removing them would yank a
     slot out from under a working agent)?"""
-    port = find_broker_port()
-    if port is None:
-        return []
-    status = broker_status(port)
-    if not status:
-        return []
-    leased = {s["slot"] for s in status.get("slots", []) if s.get("state") == "leased"}
-    return sorted(set(slots) & leased)
+    return sorted(set(slots) & set(leased_slots()))
 
 
 # --------------------------------------------------------------------------- #
@@ -204,9 +217,17 @@ def main(argv: list[str] | None = None) -> int:
     upper = max(target, cfg.pool_size) + SCAN_HEADROOM
     live = asyncio.run(_scan_live_slots(cdp_base, upper))
     procs = scan_escarp_chromes()
+    dead_procs = _dead_chrome_procs(procs, live=live)
+    # A single missed fast probe is never a kill decision: re-probe the
+    # candidates with the sweep's discipline and fold any that answer back
+    # into the live set (they then go through the guarded removal path).
+    candidates = {p.slot for p in dead_procs if p.slot is not None}
+    revived = asyncio.run(_confirm_live(candidates, cdp_base=cdp_base)) if candidates else set()
+    if revived:
+        live |= revived
+        dead_procs = [p for p in dead_procs if p.slot not in revived]
     to_launch = sorted(set(range(target)) - live)
     to_remove = sorted(s for s in live if s >= target)
-    dead_procs = _dead_chrome_procs(procs, live=live)
 
     print(f"current live slots: {sorted(live) if live else '(none)'}")
     print(
@@ -219,9 +240,11 @@ def main(argv: list[str] | None = None) -> int:
             + ", ".join(f"pid={p.pid} slot={p.slot}" for p in dead_procs)
         )
 
-    # 2. Safety: never yank a leased slot without --force.
-    if to_remove:
-        leased = _leased_slots_among(to_remove)
+    # 2. Safety: never yank a leased slot without --force -- neither a live
+    #    removal nor a dead-proc reap (the sweep skips leased slots; so do we).
+    guarded = sorted(set(to_remove) | {p.slot for p in dead_procs if p.slot is not None})
+    if guarded:
+        leased = _leased_slots_among(guarded)
         if leased and not args.force:
             print(
                 f"refusing to remove leased slot(s) {leased}: an agent is holding them. "
@@ -238,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     #    keeper slot's profile would collide with its relaunch, and one on a
     #    removed slot would survive the port-based termination below.
     if dead_procs:
-        reaped = terminate_pids([p.pid for p in dead_procs])
+        reaped = terminate_pids([p.pid for p in dead_procs], reverify=True)
         print(f"reaped {len(reaped)} stale chrome(s): pids {reaped}")
         if not args.keep_data:
             for slot in {p.slot for p in dead_procs if p.slot is not None and p.slot >= target}:
@@ -285,7 +308,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"persisted pool_size={target} to {DEFAULT_CONFIG_PATH}")
 
-    # 7. Target 0 is a full teardown: nothing left to broker, so stop the
+    # 7. --no-restart: the user said hands off the daemon, even at target 0
+    #    (a later `escarp daemon` boot will refuse pool_size=0 with a hint).
+    if args.no_restart:
+        print("--no-restart: pool reconciled and size persisted; restart the daemon to apply.")
+        return 0
+
+    # 8. Target 0 is a full teardown: nothing left to broker, so stop the
     #    daemon instead of restarting it into a guaranteed boot failure.
     if target == 0:
         pid = find_daemon_pid()
@@ -299,8 +328,5 @@ def main(argv: list[str] | None = None) -> int:
         print("daemon stopped. Run `escarp scale N` to recreate the pool.")
         return 0
 
-    # 8. Clean-restart the daemon so it brokers exactly [0, target).
-    if args.no_restart:
-        print("--no-restart: pool reconciled and size persisted; restart the daemon to apply.")
-        return 0
+    # 9. Clean-restart the daemon so it brokers exactly [0, target).
     return _restart_daemon()

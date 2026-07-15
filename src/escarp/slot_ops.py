@@ -74,6 +74,18 @@ def find_broker_port() -> int | None:
     return None
 
 
+def leased_slots() -> list[int]:
+    """Slots the running broker reports as leased to an agent ([] when no
+    broker is up to ask)."""
+    port = find_broker_port()
+    if port is None:
+        return []
+    status = broker_status(port)
+    if not status:
+        return []
+    return sorted({s["slot"] for s in status.get("slots", []) if s.get("state") == "leased"})
+
+
 def broker_url() -> str:
     """Return the best broker base URL for CLI commands."""
     raw_url = os.environ.get("ESCARP_BROKER_URL")
@@ -153,12 +165,38 @@ def read_daemon_pidfile() -> tuple[int, int] | None:
         return None
 
 
+def _pid_command(pid: int) -> str:
+    """The pid's current command line per ps, '' if it can't be read."""
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return ""
+    return out.strip()
+
+
 def find_daemon_pid() -> int | None:
-    """The running daemon's pid: the pidfile if that pid is alive, else whoever
-    is listening on the broker port. None if no daemon is running."""
+    """The running daemon's pid: the pidfile pid if it is alive AND still an
+    escarp daemon, else whoever is listening on the broker port. None if no
+    daemon is running.
+
+    The identity check matters: the pidfile survives crashes and reboots, so
+    its pid may have been reused by an unrelated process. A pid whose command
+    line is positively something else means the pidfile is stale -- clean it
+    up, never signal it. An unreadable command line proves nothing, so the
+    pidfile is kept and the port probe decides."""
     info = read_daemon_pidfile()
     if info is not None and pid_alive(info[0]):
-        return info[0]
+        command = _pid_command(info[0])
+        if "escarp" in command and "daemon" in command:
+            return info[0]
+        if command:
+            with contextlib.suppress(OSError):
+                DAEMON_PIDFILE.unlink(missing_ok=True)
     port = find_broker_port()
     if port is not None:
         pids = pids_listening_on(port)

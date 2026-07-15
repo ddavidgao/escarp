@@ -20,7 +20,7 @@ def _pool(slots: list[int]) -> tuple[Broker, PoolController]:
     return broker, PoolController(broker)
 
 
-def _patch(monkeypatch, *, procs, alive_ports):
+def _patch(monkeypatch, *, procs, alive_ports, locked_slots=frozenset()):
     killed: list[list[int]] = []
 
     async def fake_probe(port, *, timeout=2.0):
@@ -28,6 +28,7 @@ def _patch(monkeypatch, *, procs, alive_ports):
 
     monkeypatch.setattr(sw, "scan_escarp_chromes", lambda: list(procs))
     monkeypatch.setattr(sw, "probe", fake_probe)
+    monkeypatch.setattr(sw, "slot_lock_held", lambda slot: slot in locked_slots)
     monkeypatch.setattr(
         sw, "terminate_pids", lambda pids, **k: killed.append(list(pids)) or list(pids)
     )
@@ -58,6 +59,35 @@ async def test_orphan_strike_resets_when_proc_disappears(monkeypatch) -> None:
     await sweep_once(broker, controller, state)
     assert state.orphan_strikes == {}
     assert killed == []
+
+
+async def test_flocked_orphan_never_swept(monkeypatch) -> None:
+    # Second-broker contract: a held slot flock means some other broker owns
+    # this chrome (possibly leased through it); the sweep must never reap it.
+    broker, controller = _pool([0])
+    killed = _patch(monkeypatch, procs=[_proc(500, 7)], alive_ports={9222}, locked_slots={7})
+    state = SweepState()
+
+    for _ in range(sw.ORPHAN_STRIKES + 1):
+        await sweep_once(broker, controller, state)
+
+    assert killed == []
+    assert state.orphan_strikes == {}
+
+
+async def test_cdp_live_orphan_never_swept(monkeypatch) -> None:
+    # An unbrokered chrome that answers CDP is healthy (a bigger pool's slot,
+    # a manual launch, a boot-race straggler); it stays alive for a later
+    # `pool add` / `escarp daemon` to adopt.
+    broker, controller = _pool([0])
+    killed = _patch(monkeypatch, procs=[_proc(510, 7)], alive_ports={9222, 9229})
+    state = SweepState()
+
+    for _ in range(sw.ORPHAN_STRIKES + 1):
+        await sweep_once(broker, controller, state)
+
+    assert killed == []
+    assert state.orphan_strikes == {}
 
 
 async def test_dead_slot_killed_and_unbrokered_after_strikes(monkeypatch) -> None:

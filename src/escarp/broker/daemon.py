@@ -5,9 +5,9 @@ chromes are infrastructure that exists independently. To start the chromes,
 run `escarp launch-pool` (or launchd, systemd, docker, manual shell, whatever).
 This daemon's only relationship to a *healthy* chrome is "discover via
 /json/version, talk to it over CDP, never kill it." The one carve-out is the
-process sweep (broker/sweep.py): dead weight -- an orphaned escarp chrome the
-broker doesn't track, or a brokered chrome whose CDP stopped answering -- is
-reaped so it can't accumulate for days. Disable with ESCARP_SWEEP_INTERVAL_S=0.
+process sweep (broker/sweep.py): dead weight -- an orphaned escarp chrome no
+broker tracks (slot flock free AND CDP dead), or a brokered chrome whose CDP
+stopped answering -- is reaped so it can't accumulate for days. Disable with ESCARP_SWEEP_INTERVAL_S=0.
 
 End-to-end shape:
 

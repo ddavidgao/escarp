@@ -5,7 +5,11 @@ chrome. What accumulates over days is garbage the port-based lifecycle can't
 see, and this sweep collects exactly that:
 
   - orphans: escarp-signature chrome processes whose slot is not brokered
-    (left over from an old, bigger pool, or a double-launch collision).
+    HERE, whose slot flock is not held by anyone, and whose CDP does not
+    answer (left over from an old, bigger pool, or a double-launch collision).
+    A held flock means another broker owns the slot (the flock design allows
+    a second broker), and a CDP answer means the chrome is healthy and
+    adoptable by a later `pool add` -- neither is ours to kill.
   - corpses: a brokered slot whose chrome has stopped answering CDP. The
     process is killed and the slot unbrokered so /status reflects reality;
     relaunching is still the CLI's job (`escarp pool add` / `escarp scale`).
@@ -25,6 +29,7 @@ from escarp.broker.discovery import probe
 from escarp.broker.lease import Broker
 from escarp.broker.pool import PoolController
 from escarp.broker.procs import scan_escarp_chromes, terminate_pids
+from escarp.broker.slots import slot_lock_held
 
 DEFAULT_SWEEP_INTERVAL_S = 60.0
 ORPHAN_STRIKES = 2
@@ -45,18 +50,26 @@ async def sweep_once(broker: Broker, controller: PoolController, state: SweepSta
     cdp_ports = {int(str(s["slot"])): int(str(s["cdp_port"])) for s in snapshot}
     procs = await asyncio.to_thread(scan_escarp_chromes)
 
-    # Orphans: escarp chromes the broker doesn't track.
+    # Orphans: escarp chromes no broker tracks. A held slot flock means
+    # another broker owns the slot; a CDP answer means the chrome is healthy.
+    # Neither is ours to kill, so only lock-free, CDP-dead procs are struck
+    # (skipping resets their strikes via the prune below).
     seen_orphans: set[int] = set()
     for proc in procs:
         if proc.slot is not None and proc.slot in brokered:
             continue
+        if proc.slot is not None:
+            if await asyncio.to_thread(slot_lock_held, proc.slot):
+                continue
+            if await probe(controller.cdp_base + proc.slot, timeout=2.0) is not None:
+                continue
         seen_orphans.add(proc.pid)
         strikes = state.orphan_strikes.get(proc.pid, 0) + 1
         if strikes < ORPHAN_STRIKES:
             state.orphan_strikes[proc.pid] = strikes
             continue
         state.orphan_strikes.pop(proc.pid, None)
-        await asyncio.to_thread(terminate_pids, [proc.pid])
+        await asyncio.to_thread(terminate_pids, [proc.pid], reverify=True)
         print(
             f"[sweep] reaped orphan chrome pid={proc.pid} slot={proc.slot} (not brokered)",
             flush=True,
@@ -80,7 +93,7 @@ async def sweep_once(broker: Broker, controller: PoolController, state: SweepSta
         state.dead_strikes.pop(slot, None)
         pids = [p.pid for p in procs if p.slot == slot]
         if pids:
-            await asyncio.to_thread(terminate_pids, pids)
+            await asyncio.to_thread(terminate_pids, pids, reverify=True)
         try:
             await controller.remove_slot(slot, force=True)
         except Exception as exc:

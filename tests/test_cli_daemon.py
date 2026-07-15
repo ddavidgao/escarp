@@ -35,6 +35,7 @@ def test_stop_without_daemon_clears_stale_pidfile(monkeypatch, tmp_path) -> None
 
 def test_kill_pool_terminates_all_escarp_chromes(monkeypatch) -> None:
     killed: list[list[int]] = []
+    monkeypatch.setattr(cd, "leased_slots", lambda: [])
     monkeypatch.setattr(cd, "find_daemon_pid", lambda: 4242)
     monkeypatch.setattr(cd, "stop_daemon", lambda pid, **k: True)
     monkeypatch.setattr(
@@ -48,3 +49,31 @@ def test_kill_pool_terminates_all_escarp_chromes(monkeypatch) -> None:
 
     assert cd.stop_main(["--kill-pool"]) == 0
     assert killed == [[11, 22]]
+
+
+def test_kill_pool_refuses_leased_without_force(monkeypatch) -> None:
+    # The refusal happens before the daemon is touched: the broker must still
+    # be up to answer the lease query, and a refused teardown changes nothing.
+    stopped: list[int] = []
+    monkeypatch.setattr(cd, "leased_slots", lambda: [2])
+    monkeypatch.setattr(cd, "find_daemon_pid", lambda: 4242)
+    monkeypatch.setattr(cd, "stop_daemon", lambda pid, **k: stopped.append(pid) or True)
+
+    assert cd.stop_main(["--kill-pool"]) == 3
+    assert stopped == []
+
+
+def test_kill_pool_force_overrides_lease_guard(monkeypatch) -> None:
+    killed: list[list[int]] = []
+    monkeypatch.setattr(cd, "leased_slots", lambda: [2])
+    monkeypatch.setattr(cd, "find_daemon_pid", lambda: 4242)
+    monkeypatch.setattr(cd, "stop_daemon", lambda pid, **k: True)
+    monkeypatch.setattr(
+        cd, "scan_escarp_chromes", lambda: [ChromeProc(pid=11, slot=2, command="c")]
+    )
+    monkeypatch.setattr(
+        cd, "terminate_pids", lambda pids, **k: killed.append(list(pids)) or list(pids)
+    )
+
+    assert cd.stop_main(["--kill-pool", "--force"]) == 0
+    assert killed == [[11]]

@@ -80,8 +80,15 @@ def scan_escarp_chromes(*, profile_root: Path | None = None) -> list[ChromeProc]
     return procs
 
 
-def terminate_pids(pids: list[int], *, grace: float = 3.0) -> list[int]:
-    """SIGTERM (then SIGKILL) each pid. Returns the pids that were alive to signal."""
+def terminate_pids(pids: list[int], *, grace: float = 3.0, reverify: bool = False) -> list[int]:
+    """SIGTERM (then SIGKILL) each pid. Returns the pids that were alive to signal.
+
+    reverify=True re-scans the process table and drops pids that no longer
+    carry the escarp chrome signature: kill lists are captured seconds before
+    the signal, and a pid the OS reused in that window must never be hit."""
+    if reverify:
+        current = {p.pid for p in scan_escarp_chromes()}
+        pids = [pid for pid in pids if pid in current]
     targets = [pid for pid in pids if pid_alive(pid)]
     for pid in targets:
         with contextlib.suppress(ProcessLookupError, PermissionError):

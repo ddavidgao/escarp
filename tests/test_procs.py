@@ -57,6 +57,22 @@ def test_terminate_pids_kills_real_process() -> None:
             os.kill(proc.pid, signal.SIGKILL)
 
 
+def test_terminate_pids_reverify_drops_stale_pids(monkeypatch) -> None:
+    # The kill list is captured seconds before the signal; a pid whose command
+    # no longer carries the escarp signature (exited, pid reused) is skipped.
+    root = Path("/Users/x/.escarp/profiles")
+    monkeypatch.setattr(pr, "DEFAULT_PROFILE_DIR", root)
+    _fake_ps(
+        monkeypatch,
+        f"  100 /Applications/Chrome --user-data-dir={root}/autonomous/slot-0 about:blank\n",
+    )
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(pr.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+
+    assert pr.terminate_pids([100, 200], grace=0.0, reverify=True) == [100]
+    assert {pid for pid, sig in sent if sig != 0} == {100}
+
+
 def test_terminate_pids_skips_already_dead() -> None:
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait(timeout=10)

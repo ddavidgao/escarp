@@ -13,6 +13,7 @@ from escarp.broker.slots import (
     claim_any_slot,
     claim_slot,
     ports_for_slot,
+    slot_lock_held,
 )
 
 
@@ -109,6 +110,17 @@ def test_slot_lock_released_when_process_dies(tmp_path: Path) -> None:
         lease.release()
     finally:
         os.close(read_fd)
+
+
+def test_slot_lock_held_reflects_flock(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "locks"
+    assert slot_lock_held(3, lock_dir=lock_dir) is False  # no lockfile yet
+    lease = claim_slot(3, lock_dir=lock_dir, profile_root=tmp_path / "profiles")
+    try:
+        assert slot_lock_held(3, lock_dir=lock_dir) is True
+    finally:
+        lease.release()
+    assert slot_lock_held(3, lock_dir=lock_dir) is False  # released, probe must not re-hold
 
 
 def test_claim_any_slot_walks_pool(tmp_path: Path) -> None:
